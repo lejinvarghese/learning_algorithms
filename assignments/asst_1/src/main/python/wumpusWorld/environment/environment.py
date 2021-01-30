@@ -1,70 +1,70 @@
 #!/usr/bin/env python3
 
-# package wumpusWorld.environment
-# import wumpusWorld.Bayes.Probability
-# import scala.util.Random
+from enum import Enum
+from numpy.random import randint
 
-class Action:
+class Action(Enum):
+
+    forward = 1
+    turn_left = 2
+    turn_right = 3
+    shoot = 4
+    grab = 5
+    climb = 6
+
     def __init__(self, percept):
-      self.percept = percept
+        self.percept = percept
 
 class Percept:
-    pass
+
+    def __init__(self, stench = False, breeze = False, glitter = False, bump = False, scream = False, is_terminated = False, reward = 0.0):
+        self.stench = stench
+        self.breeze = breeze
+        self.glitter = glitter
+        self.bump = bump
+        self.scream = scream
+        self.is_terminated = is_terminated
+        self.reward = reward
+
+    def show(self):
+        print(f'stench: {self.stench} \n breeze: {self.breeze} \n glitter: {self.glitter} \n bump: {self.bump} \n scream: {self.scream} \n is_terminated: {self.is_terminated} \n reward: {self.reward}')
+
+class Direction(Enum):
+    north = 1
+    south = 2
+    east = 3
+    west = 4
 
 class Orientation:
-    def __init__(self, percept):
-      self.percept = percept
 
+    def __init__(self, active_orientation = Direction.east):
+        self.active_orientation = active_orientation
 
-# sealed trait Orientation {
-#   def turnLeft: Orientation
+    def turn_left(self):
+        if self.active_orientation == Direction.north:
+            self.active_orientation = Direction.west
+        elif self.active_orientation == Direction.south:
+            self.active_orientation = Direction.east
+        elif self.active_orientation == Direction.east:
+            self.active_orientation = Direction.north
+        elif self.active_orientation == Direction.west:
+            self.active_orientation = Direction.south
+    
+    def turn_right(self):
+        if self.active_orientation == Direction.north:
+            self.active_orientation = Direction.east
+        elif self.active_orientation == Direction.south:
+            self.active_orientation = Direction.west
+        elif self.active_orientation == Direction.east:
+            self.active_orientation = Direction.south
+        elif self.active_orientation == Direction.west:
+            self.active_orientation = Direction.north
 
-#   def turnRight: Orientation
-# }
+class Coordinates:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
 
-# case object North extends Orientation {
-#   def turnLeft: Orientation = West
-
-#   def turnRight: Orientation = East
-# }
-
-# case object South extends Orientation {
-#   def turnLeft: Orientation = East
-
-#   def turnRight: Orientation = West
-# }
-
-# case object East extends Orientation {
-#   def turnLeft: Orientation = North
-
-#   def turnRight: Orientation = South
-# }
-
-# case object West extends Orientation {
-#   def turnLeft: Orientation = South
-
-#   def turnRight: Orientation = North
-# }
-
-# sealed trait Action
-
-# case object Forward extends Action
-
-# case object TurnLeft extends Action
-
-# case object TurnRight extends Action
-
-# case object Shoot extends Action
-
-# case object Grab extends Action
-
-# case object Climb extends Action
-
-# case class Coords(x: Int, y: Int)
-
-# case class Percept(stench: Boolean, breeze: Boolean, glitter: Boolean, bump: Boolean, scream: Boolean, isTerminated: Boolean, reward: Double) {
-#   def show: String = s"stench:$stench breeze:$breeze glitter:$glitter bump:$bump scream:$scream isTerminated:$isTerminated reward:$reward"
-# }
 
 # final case class Environment private(
 #                                       gridWidth: Int,
@@ -124,7 +124,7 @@ class Orientation:
 #   private def isBreeze: Boolean = isPitAdjacent(agent.location)
 
 #   private def isStench: Boolean = isWumpusAdjacent(agent.location) || isWumpusAt(agent.location)
-  
+
 #   def applyAction(action: Action): (Environment, Percept) = {
 
 #     if (terminated)
@@ -237,5 +237,3 @@ class Orientation:
 #     )
 #   }
 # }
-
-
