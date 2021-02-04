@@ -65,40 +65,6 @@ class Coordinates:
         self.x = x
         self.y = y
 
-class Environment:
-    def __init__(self, grid_width, grid_height, pit_proba, allow_climb_without_gold, agent, pit_locations, terminated, wumpus_location, wumpus_alive, gold_location):
-        self.grid_width = grid_width
-        self.grid_height = grid_height
-        self.pit_proba = pit_proba
-        self.allow_climb_without_gold = allow_climb_without_gold
-        self.agent = agent
-        self.pit_locations = pit_locations
-        self.terminated = terminated
-        self.wumpus_location = wumpus_location
-        self.wumpus_alive = wumpus_alive
-        self.wumpus_location = wumpus_location
-        self.gold_location = gold_location
-
-    def is_pit_at(self, coords):
-        self.pit_locations == coords
-    
-    def is_wumpus_at(self, coords):
-        self.wumpus_location == coords
-    
-    def is_agent_at(self, coords):
-        self.agent.location == coords
-    
-    def is_glitter(self):
-        self.gold_location == self.agent.location
-    
-    def is_gold_location(self, coords):
-        self.gold_location == coords
-
-    def kill_attempt_successful(self):
-        if 
-        def wumpus_in_line_of_fire(self)
-            self.agent.orientation is reve
-    
 
 # final case class Environment private(
 #                                       gridWidth: Int,
