@@ -1,7 +1,6 @@
-from environment import Action, Percept, Orientation
+from environment import Action, Percept, Orientation, Coordinates, Direction, Environment
 from numpy.random import randint
 from agent import Agent
-from environment import Coordinates, Direction
 
 action = Action(randint(1,6))
 print(action)
@@ -17,7 +16,11 @@ print(percept)
 # print(orient.orientation)
 
 
-# location = Coordinates(0, 0)
+locations = [Coordinates(0, 0), Coordinates(1, 0)]
+
+print('cond', locations[0].x == 0 & locations[0].y ==0)
+
+
 
 agent = Agent()
 print(agent.orientation.orientation)

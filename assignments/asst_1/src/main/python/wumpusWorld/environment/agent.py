@@ -2,6 +2,7 @@
 from environment import Coordinates, Direction, Orientation
 
 class Agent(object):
+  
   def __init__(self, location = Coordinates(0, 0), orientation = Orientation(), has_gold=False, has_arrow=True, is_alive=True):
     self.location = location
     self.orientation = orientation

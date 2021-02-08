@@ -37,34 +37,97 @@ class Direction(Enum):
 
 class Orientation:
 
-    def __init__(self, active_orientation = Direction.east):
-        self.active_orientation = active_orientation
+    def __init__(self, orientation = Direction.east):
+        self.orientation = orientation
 
     def turn_left(self):
-        if self.active_orientation == Direction.north:
-            self.active_orientation = Direction.west
-        elif self.active_orientation == Direction.south:
-            self.active_orientation = Direction.east
-        elif self.active_orientation == Direction.east:
-            self.active_orientation = Direction.north
-        elif self.active_orientation == Direction.west:
-            self.active_orientation = Direction.south
+        if self.orientation == Direction.north:
+            self.orientation = Direction.west
+        elif self.orientation == Direction.south:
+            self.orientation = Direction.east
+        elif self.orientation == Direction.east:
+            self.orientation = Direction.north
+        elif self.orientation == Direction.west:
+            self.orientation = Direction.south
     
     def turn_right(self):
-        if self.active_orientation == Direction.north:
-            self.active_orientation = Direction.east
-        elif self.active_orientation == Direction.south:
-            self.active_orientation = Direction.west
-        elif self.active_orientation == Direction.east:
-            self.active_orientation = Direction.south
-        elif self.active_orientation == Direction.west:
-            self.active_orientation = Direction.north
+        if self.orientation == Direction.north:
+            self.orientation = Direction.east
+        elif self.orientation == Direction.south:
+            self.orientation = Direction.west
+        elif self.orientation == Direction.east:
+            self.orientation = Direction.south
+        elif self.orientation == Direction.west:
+            self.orientation = Direction.north
 
 class Coordinates:
     def __init__(self, x, y):
         self.x = x
         self.y = y
 
+class Environment (object):
+    
+    def __init__(self, grid_width, grid_height, pit_proba, allow_climb_without_gold, agent, pit_locations, terminated, wumpus_location, wumpus_alive, gold_location):
+        self.grid_width = grid_width
+        self.grid_height = grid_height
+        self.pit_proba = pit_proba
+        self.allow_climb_without_gold = allow_climb_without_gold
+        self.agent = agent
+        self.pit_locations = pit_locations
+        self.terminated = terminated
+        self.wumpus_location = wumpus_location
+        self.wumpus_alive = wumpus_alive
+        self.gold_location = gold_location
+
+    def _is_pit_at(self, location):
+        return any(x.x == location.x & x.y == location.y for x in self.pit_locations)
+
+    def _is_wumpus_at(self, location):
+        return (self.wumpus_location.x == location.x & self.wumpus_location.y == location.y)
+
+    def _is_agent_at(self, location):
+        return (self.agent.location.x == location.x & self.agent.location.y == location.y)
+
+    def _is_glitter(self):
+        return (self.gold_location.x == self.gold_location.x & self.gold_location.x == self.gold_location.x )
+
+    def _is_gold_at(self, location):
+        return (self.gold_location.x == location.x & self.gold_location.y == location.y)
+
+    def _kill_attempt_successful(self):
+
+        def _wumpus_in_line_of_fire(self):
+            orientation_value = self.agent.orientation.orientation
+            if orientation_value == Direction.west:
+                return (self.agent.location.x > self.wumpus_location.x & self.agent.location.y == self.wumpus_location.y)
+            elif orientation_value == Direction.east:
+                return (self.agent.location.x < self.wumpus_location.x & self.agent.location.y == self.wumpus_location.y)
+            elif orientation_value == Direction.south:
+                return (self.agent.location.x == self.wumpus_location.x & self.agent.location.y > self.wumpus_location.y)
+            elif orientation_value == Direction.north:
+                return (self.agent.location.x == self.wumpus_location.x & self.agent.location.y < self.wumpus_location.y)
+        
+        return (self.agent.has_arrow & self.wumpus_alive & _wumpus_in_line_of_fire(self))
+
+    def _adjacent_cells(self, location):
+
+        _left = Coordinates(location.x -1, location.y) if location.x>0 else None
+        _right = Coordinates(location.x + 1, location.y) if location.x < (self.grid_width - 1) else None
+        _below = Coordinates(location.x, location.y - 1) if location.y>0 else None
+        _above = Coordinates(location.x, location.y + 1) if location.y < (self.grid_height - 1) else None
+        return [_left, _right, _below, _above]
+
+    def _is_pit_adjacent(self, location):
+        return any(x in self.pit_locations for x in self._adjacent_cells(location))
+
+    def _is_wumpus_adjacent(self, location):
+        return self.wumpus_location in self._adjacent_cells(location)
+
+    def _is_breeze(self):
+        return self._is_pit_adjacent(self.agent.location)
+
+    def _is_stench(self):
+        return self._is_wumpus_adjacent(self.agent.location) | self._is_wumpus_at(self.agent.location)
 
 # final case class Environment private(
 #                                       gridWidth: Int,
