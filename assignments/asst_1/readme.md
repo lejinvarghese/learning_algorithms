@@ -10,11 +10,11 @@ python3 wumpus_world.py
 
 ## Guide
 
-:hatched_chick: - Agent
-:space_invader: - Wumpus (Alive)
-:skull: - Wumpus (Dead)
-:hole: - Pit
-:1st_place_medal: - Gold
+- :hatched_chick: - Agent
+- :space_invader: - Wumpus (Alive)
+- :skull: - Wumpus (Dead)
+- :hole: - Pit
+- :1st_place_medal: - Gold
 
 ## Results
 
