@@ -1,3 +1,3 @@
 # Results Grid
 
-![results grid](assets/../asst_1/assets/screenshot_10x10.png)
+![results grid](https://github.com/lejinvarghese/reinforcement_learning/blob/main/assignments/asst_1/assets/screenshot_10x10.png)
