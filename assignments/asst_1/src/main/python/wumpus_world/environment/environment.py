@@ -71,6 +71,49 @@ class Coordinates:
         self.y = y
 
 
+class Agent:
+
+    def __init__(self, location=Coordinates(0, 0), orientation=Orientation(), has_gold=False, has_arrow=True, is_alive=True):
+        self.location = location
+        self.orientation = orientation
+        self.has_gold = has_gold
+        self.has_arrow = has_arrow
+        self.is_alive = is_alive
+
+    def __copy__(self):
+        return Agent(self.location, self.orientation, self.has_gold,
+                     self.has_arrow, self.is_alive)
+
+    def turn_left(self):
+        newAgent = Agent.__copy__(self)
+        newAgent.orientation.turn_left()
+        return newAgent
+
+    def turn_right(self):
+        newAgent = Agent.__copy__(self)
+        newAgent.orientation.turn_right()
+        return newAgent
+
+    def forward(self, grid_width, grid_height):
+        new_location = self.location
+        orientation_value = self.orientation.orientation
+        if orientation_value == Direction.west:
+            new_location = Coordinates(
+                max(0, self.location.x - 1), self.location.y)
+        elif orientation_value == Direction.east:
+            new_location = Coordinates(
+                min(grid_width - 1, self.location.x + 1), self.location.y)
+        elif orientation_value == Direction.south:
+            new_location = Coordinates(
+                self.location.x, max(0, self.location.y - 1))
+        elif orientation_value == Direction.north:
+            new_location = Coordinates(self.location.x, min(
+                grid_height - 1, self.location.y + 1))
+        newAgent = Agent.__copy__(self)
+        newAgent.location = new_location
+        return newAgent
+
+
 class Environment:
 
     def __init__(self, grid_width, grid_height, pit_proba, allow_climb_without_gold, agent, pit_locations, terminated, wumpus_location, wumpus_alive, gold_location):
@@ -128,10 +171,14 @@ class Environment:
         return [_left, _right, _below, _above]
 
     def _is_pit_adjacent(self, location):
-        return any(x in self.pit_locations for x in self._adjacent_cells(location))
+        cells = list(
+            filter(None.__ne__, self._adjacent_cells(location)))
+        return any((cell.x == pit.x) & (cell.y == pit.y) for cell in cells for pit in self.pit_locations)
 
     def _is_wumpus_adjacent(self, location):
-        return self.wumpus_location in self._adjacent_cells(location)
+        cells = list(
+            filter(None.__ne__, self._adjacent_cells(location)))
+        return any((cell.x == self.wumpus_location.x) & (cell.y == self.wumpus_location.y) for cell in cells)
 
     def _is_breeze(self):
         return self._is_pit_adjacent(self.agent.location)
@@ -192,7 +239,7 @@ class Environment:
                 new_agent = self.agent.__copy__()
                 new_agent.has_arrow = False
                 new_environment = Environment(
-                    self.grid_width, self.grid_height, self.pit_proba, self.allow_climb_without_gold, new_agent, self.pit_locations, self.terminated, self.wumpus_location, self.wumpus_alive & (not wumpus_killed), self.gold_location)
+                    self.grid_width, self.grid_height, self.pit_proba, self.allow_climb_without_gold, new_agent, self.pit_locations, self.terminated, self.wumpus_location, (self.wumpus_alive) & (not wumpus_killed), self.gold_location)
                 new_percept = Percept(self._is_stench(), self._is_breeze(), self._is_glitter(),
                                       False, wumpus_killed, False, -11 if had_arrow else -1)
                 return (new_environment, new_percept)
@@ -200,41 +247,43 @@ class Environment:
     def visualize(self):
         wumpus_symbol = "\U0001F47E" if self.wumpus_alive else "\U0001F480"
         arr = np.full((self.grid_width, self.grid_height), "  ")
+        print('agent new location: ', self.agent.location.x, self.agent.location.y)
+        print('agent new orientation: ', self.agent.orientation.orientation)
 
-        for x in range(self.grid_width):
-            for y in range(self.grid_height):
+        for y in range(self.grid_width):
+            for x in range(self.grid_height):
                 if self._is_agent_at(Coordinates(x, y)):
-                    arr[x, y] = "\U0001F425"
+                    arr[y, x] = "\U0001F425"
                 elif self._is_pit_at(Coordinates(x, y)):
-                    arr[x, y] = "\U0001F573 "
+                    arr[y, x] = "\U0001F573 "
                 elif self._is_gold_at(Coordinates(x, y)):
-                    arr[x, y] = "\U0001F947"
+                    arr[y, x] = "\U0001F947"
                 elif self._is_wumpus_at(Coordinates(x, y)):
-                    arr[x, y] = wumpus_symbol
+                    arr[y, x] = wumpus_symbol
                 else:
                     "  "
-
         return np.array2string(np.flipud(arr), separator="|", formatter={'str_kind': lambda x: x})
 
-    def initialize(self):
 
-        def random_location_except_origin(self):
-            x = np.random.randint(self.grid_width)
-            y = np.random.randint(self.grid_height)
-            if (x == 0) & (y == 0):
-                return random_location_except_origin(self)
-            else:
-                return Coordinates(x, y)
+def initialize_environment(grid_width, grid_height, pit_proba, allow_climb_without_gold):
 
-        pit_locations = [Coordinates(x, y) if np.random.uniform() <
-                         self. pit_proba else None for x in range(self.grid_width) for y in range(self.grid_height)]
-        pit_locations[0] = None  # setting starting point to 0
-        pit_locations = list(filter(None.__ne__, pit_locations))
+    def random_location_except_origin():
+        x = np.random.randint(grid_width)
+        y = np.random.randint(grid_height)
+        if (x == 0) & (y == 0):
+            return random_location_except_origin()
+        else:
+            return Coordinates(x, y)
 
-        environment = Environment(
-            self.grid_width, self.grid_height, self.pit_proba, self.allow_climb_without_gold, self.agent, pit_locations, False, random_location_except_origin(self), True, random_location_except_origin(self))
+    pit_locations = [Coordinates(x, y) if np.random.uniform() <
+                     pit_proba else None for x in range(grid_width) for y in range(grid_height)]
+    pit_locations[0] = None  # setting starting point to 0
+    pit_locations = list(filter(None.__ne__, pit_locations))
 
-        percept = Percept(environment._is_stench(
-        ), environment._is_breeze(), False, False, False, False, 0.0)
+    environment = Environment(
+        grid_width, grid_height, pit_proba, allow_climb_without_gold, Agent(), pit_locations, False, random_location_except_origin(), True, random_location_except_origin())
 
-        return (environment, percept)
+    percept = Percept(environment._is_stench(
+    ), environment._is_breeze(), False, False, False, False, 0.0)
+
+    return (environment, percept)
