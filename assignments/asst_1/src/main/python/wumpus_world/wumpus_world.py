@@ -22,7 +22,7 @@ def main():
         return next_percept.reward
 
     initial_environment, initial_percept = initialize_environment(
-        grid_width=4, grid_height=4, pit_proba=0.2, allow_climb_without_gold=False)
+        grid_width=4, grid_height=4, pit_proba=0.2, allow_climb_without_gold=True)
 
     naive_agent = NaiveAgent()
     total_reward = run_episode(

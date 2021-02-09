@@ -3,7 +3,7 @@
 ## Installation
 
 ```python
-cd /media/starscream/wheeljack/learn/university_of_toronto/reinforcement_learning/assignments/asst_1/src/main/python/wumpus_world
+cd src/main/python/wumpus_world
 pip install -r requirements.txt
 python3 wumpus_world.py
 ```
