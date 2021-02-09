@@ -10,6 +10,6 @@ python3 wumpus_world.py
 
 ## Results
 
-These results are for a 10x10 grid, but the source code is realigned to a 4x4 grid.
+These results are a screenshot for a 10x10 grid environment simulation, but the source code is realigned to a 4x4 grid environment.
 
 ![results grid](https://github.com/lejinvarghese/reinforcement_learning/blob/main/assignments/asst_1/assets/screenshot_10x10.png)
