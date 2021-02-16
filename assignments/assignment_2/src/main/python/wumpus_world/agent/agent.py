@@ -152,7 +152,7 @@ class BeelineAgent:
             new_agent.agent_state.has_gold = True
             _action = Action.grab
         else:
-            _rand_number = np.random.randint(low=1, high=4)
+            _rand_number = np.random.randint(low=1, high=5)
             if _rand_number == 1:
                 new_agent = BeelineAgent.__copy__(self)
                 _new_agent_state = new_agent.agent_state.forward(
