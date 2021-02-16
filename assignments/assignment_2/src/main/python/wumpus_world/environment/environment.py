@@ -256,10 +256,10 @@ class Environment:
             elif action == Action.shoot:
                 had_arrow = self.agent.has_arrow
                 wumpus_killed = self._kill_attempt_successful()
-                # new_agent = self.agent.__copy__()
-                # new_agent.has_arrow = False
+                new_agent = self.agent.__copy__()
+                new_agent.has_arrow = False
                 new_environment = Environment(
-                    self.grid_width, self.grid_height, self.pit_proba, self.allow_climb_without_gold, self.agent, self.pit_locations, self.terminated, self.wumpus_location, (self.wumpus_alive) & (not wumpus_killed), self.gold_location)
+                    self.grid_width, self.grid_height, self.pit_proba, self.allow_climb_without_gold, new_agent, self.pit_locations, self.terminated, self.wumpus_location, (self.wumpus_alive) & (not wumpus_killed), self.gold_location)
                 new_percept = Percept(self._is_stench(), self._is_breeze(), self._is_glitter(),
                                       False, wumpus_killed, False, -11 if had_arrow else -1)
                 return (new_environment, new_percept)
