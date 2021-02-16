@@ -119,14 +119,15 @@ class AgentState:
         return new_agent
 
     def apply_move_action(self, action, grid_width, grid_height):
+        new_agent = AgentState.__copy__(self)
         if action == Action.turn_left:
-            return self.turn_left()
+            return new_agent.turn_left()
         elif action == Action.turn_right:
-            return self.turn_right()
+            return new_agent.turn_right()
         elif action == Action.forward:
-            return self.forward(grid_width, grid_height)
+            return new_agent.forward(grid_width, grid_height)
         else:
-            return self
+            return new_agent
 
     def show(self):
         print(f'location: {self.location} \n orientation: {self.orientation} \n has_gold: {self.has_gold} \n has_arrow: {self.has_arrow} \n is_alive: {self.is_alive}')
@@ -236,6 +237,7 @@ class Environment:
             elif action == Action.grab:
                 new_agent = self.agent.__copy__()
                 new_agent.has_gold = self._is_glitter()
+                print('gold status in env', new_agent.has_gold)
                 new_environment = Environment(
                     self.grid_width, self.grid_height, self.pit_proba, self.allow_climb_without_gold, new_agent, self.pit_locations, self.terminated, self.wumpus_location, self.wumpus_alive, self.agent.location if new_agent.has_gold else self.gold_location)
                 new_percept = Percept(self._is_stench(), self._is_breeze(), self._is_glitter(),

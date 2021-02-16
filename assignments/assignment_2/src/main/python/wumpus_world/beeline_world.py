@@ -11,7 +11,6 @@ def main():
 
         next_environment, next_percept = environment.apply_action(
             next_action)
-
         print(next_environment.visualize())
         print(next_percept.show())
         if not(next_percept.is_terminated):
@@ -23,7 +22,7 @@ def main():
         return next_percept.reward
 
     initial_environment, initial_percept = initialize_environment(
-        grid_width=4, grid_height=4, pit_proba=0.2, allow_climb_without_gold=True)
+        grid_width=4, grid_height=4, pit_proba=0.0, allow_climb_without_gold=True)
     print("initial environment >>")
     print(initial_environment.visualize())
 
