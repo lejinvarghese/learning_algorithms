@@ -21,12 +21,13 @@ def main():
 
         return next_percept.reward
 
+    grid_width, grid_height = (4, 4)
     initial_environment, initial_percept = initialize_environment(
-        grid_width=4, grid_height=4, pit_proba=0.0, allow_climb_without_gold=True)
+        grid_width=grid_width, grid_height=grid_height, pit_proba=0.2, allow_climb_without_gold=True)
     print("initial environment >>")
     print(initial_environment.visualize())
 
-    agent = initialize_beeline_agent(4, 4)
+    agent = initialize_beeline_agent(grid_width, grid_height)
     total_reward = run_episode(
         initial_environment, agent, initial_percept)
     print("total_reward: ", total_reward)

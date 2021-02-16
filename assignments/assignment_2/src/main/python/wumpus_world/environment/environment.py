@@ -237,7 +237,6 @@ class Environment:
             elif action == Action.grab:
                 new_agent = self.agent.__copy__()
                 new_agent.has_gold = self._is_glitter()
-                print('gold status in env', new_agent.has_gold)
                 new_environment = Environment(
                     self.grid_width, self.grid_height, self.pit_proba, self.allow_climb_without_gold, new_agent, self.pit_locations, self.terminated, self.wumpus_location, self.wumpus_alive, self.agent.location if new_agent.has_gold else self.gold_location)
                 new_percept = Percept(self._is_stench(), self._is_breeze(), self._is_glitter(),
