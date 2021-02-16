@@ -23,4 +23,7 @@ An example of a succesful run, agent climbs out from (0, 0) after grabbing the g
 ![1](https://github.com/lejinvarghese/reinforcement_learning/blob/a_2/assignments/assignment_2/assets/screenshot_1.png)
 ![2](https://github.com/lejinvarghese/reinforcement_learning/blob/a_2/assignments/assignment_2/assets/screenshot_2.png)
 ![3](https://github.com/lejinvarghese/reinforcement_learning/blob/a_2/assignments/assignment_2/assets/screenshot_3.png)
+
+..eventually after all beeline actions..
+
 ![4](https://github.com/lejinvarghese/reinforcement_learning/blob/a_2/assignments/assignment_2/assets/screenshot_4.png)
