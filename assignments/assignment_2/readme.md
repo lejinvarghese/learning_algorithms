@@ -5,7 +5,7 @@
 ```python
 cd src/main/python/wumpus_world
 pip install -r requirements.txt
-python3 wumpus_world.py
+python3 beeline_world.py
 ```
 
 ## Guide
@@ -18,6 +18,12 @@ python3 wumpus_world.py
 
 ## Results
 
-These results are a screenshot for a 10x10 grid environment simulation, but the source code is realigned to a 4x4 grid environment.
+An example of a succesful run, agent climbs out from (0, 0) after grabbing the gold, and beelining for the exit.
 
-![results grid](https://github.com/lejinvarghese/reinforcement_learning/blob/main/assignments/asst_1/assets/screenshot_10x10.png)
+![1](https://github.com/lejinvarghese/reinforcement_learning/blob/a_2/assignments/assignment_2/assets/screenshot_1.png)
+![2](https://github.com/lejinvarghese/reinforcement_learning/blob/a_2/assignments/assignment_2/assets/screenshot_2.png)
+![3](https://github.com/lejinvarghese/reinforcement_learning/blob/a_2/assignments/assignment_2/assets/screenshot_3.png)
+
+..eventually after all beeline actions..
+
+![4](https://github.com/lejinvarghese/reinforcement_learning/blob/a_2/assignments/assignment_2/assets/screenshot_4.png)

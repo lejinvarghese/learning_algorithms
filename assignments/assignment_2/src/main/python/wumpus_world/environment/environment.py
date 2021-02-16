@@ -71,7 +71,7 @@ class Coordinates:
         self.y = y
 
 
-class Agent:
+class AgentState:
 
     def __init__(self, location=Coordinates(0, 0), orientation=Orientation(), has_gold=False, has_arrow=True, is_alive=True):
         self.location = location
@@ -81,18 +81,18 @@ class Agent:
         self.is_alive = is_alive
 
     def __copy__(self):
-        return Agent(self.location, self.orientation, self.has_gold,
-                     self.has_arrow, self.is_alive)
+        return AgentState(self.location, self.orientation, self.has_gold,
+                          self.has_arrow, self.is_alive)
 
     def turn_left(self):
-        newAgent = Agent.__copy__(self)
-        newAgent.orientation.turn_left()
-        return newAgent
+        new_agent = AgentState.__copy__(self)
+        new_agent.orientation.turn_left()
+        return new_agent
 
     def turn_right(self):
-        newAgent = Agent.__copy__(self)
-        newAgent.orientation.turn_right()
-        return newAgent
+        new_agent = AgentState.__copy__(self)
+        new_agent.orientation.turn_right()
+        return new_agent
 
     def forward(self, grid_width, grid_height):
         new_location = self.location
@@ -109,9 +109,28 @@ class Agent:
         elif orientation_value == Direction.north:
             new_location = Coordinates(self.location.x, min(
                 grid_height - 1, self.location.y + 1))
-        newAgent = Agent.__copy__(self)
-        newAgent.location = new_location
-        return newAgent
+        new_agent = AgentState.__copy__(self)
+        new_agent.location = new_location
+        return new_agent
+
+    def use_arrow(self):
+        new_agent = AgentState.__copy__(self)
+        new_agent.has_arrow = False
+        return new_agent
+
+    def apply_move_action(self, action, grid_width, grid_height):
+        new_agent = AgentState.__copy__(self)
+        if action == Action.turn_left:
+            return new_agent.turn_left()
+        elif action == Action.turn_right:
+            return new_agent.turn_right()
+        elif action == Action.forward:
+            return new_agent.forward(grid_width, grid_height)
+        else:
+            return new_agent
+
+    def show(self):
+        print(f'location: {self.location} \n orientation: {self.orientation} \n has_gold: {self.has_gold} \n has_arrow: {self.has_arrow} \n is_alive: {self.is_alive}')
 
 
 class Environment:
@@ -205,13 +224,13 @@ class Environment:
                 return (new_environment, new_percept)
             elif action == Action.turn_left:
                 new_environment = Environment(
-                    self.grid_width, self.grid_height, self.pit_proba, self.allow_climb_without_gold, self.agent.turn_left(), self.pit_locations, self.terminated, self.wumpus_location, self.wumpus_alive, self.gold_location)
+                    self.grid_width, self.grid_height, self.pit_proba, self.allow_climb_without_gold, self.agent, self.pit_locations, self.terminated, self.wumpus_location, self.wumpus_alive, self.gold_location)
                 new_percept = Percept(self._is_stench(), self._is_breeze(), self._is_glitter(),
                                       False, False, False, -1)
                 return (new_environment, new_percept)
             elif action == Action.turn_right:
                 new_environment = Environment(
-                    self.grid_width, self.grid_height, self.pit_proba, self.allow_climb_without_gold, self.agent.turn_right(), self.pit_locations, self.terminated, self.wumpus_location, self.wumpus_alive, self.gold_location)
+                    self.grid_width, self.grid_height, self.pit_proba, self.allow_climb_without_gold, self.agent, self.pit_locations, self.terminated, self.wumpus_location, self.wumpus_alive, self.gold_location)
                 new_percept = Percept(self._is_stench(), self._is_breeze(), self._is_glitter(),
                                       False, False, False, -1)
                 return (new_environment, new_percept)
@@ -224,7 +243,8 @@ class Environment:
                                       False, False, False, -1)
                 return (new_environment, new_percept)
             elif action == Action.climb:
-                in_start_location = self.agent.location == Coordinates(0, 0)
+                in_start_location = (self.agent.location.x == 0) & (
+                    self.agent.location.y == 0)
                 success = self.agent.has_gold & in_start_location
                 is_terminated = success | (
                     self.allow_climb_without_gold & in_start_location)
@@ -281,7 +301,7 @@ def initialize_environment(grid_width, grid_height, pit_proba, allow_climb_witho
     pit_locations = list(filter(None.__ne__, pit_locations))
 
     environment = Environment(
-        grid_width, grid_height, pit_proba, allow_climb_without_gold, Agent(), pit_locations, False, random_location_except_origin(), True, random_location_except_origin())
+        grid_width, grid_height, pit_proba, allow_climb_without_gold, AgentState(), pit_locations, False, random_location_except_origin(), True, random_location_except_origin())
 
     percept = Percept(environment._is_stench(
     ), environment._is_breeze(), False, False, False, False, 0.0)
