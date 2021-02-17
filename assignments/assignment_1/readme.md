@@ -20,4 +20,4 @@ python3 wumpus_world.py
 
 These results are a screenshot for a 10x10 grid environment simulation, but the source code is realigned to a 4x4 grid environment.
 
-![results grid](https://github.com/lejinvarghese/reinforcement_learning/blob/main/assignments/asst_1/assets/screenshot_10x10.png)
+![results grid](assets/screenshot_10x10.png)
