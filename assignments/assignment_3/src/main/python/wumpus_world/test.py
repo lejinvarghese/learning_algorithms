@@ -8,20 +8,42 @@ from environment.environment import (
 )
 import numpy as np
 from agent.agent import Agent, BeelineAgent
-import networkx as nx
-from scipy.spatial.distance import cdist
-from itertools import product
 from beeline_world import main
+from pomegranate import DiscreteDistribution, ConditionalProbabilityTable, Node
 
-n_simulations = 300
-n_success = 0
-for i in range(n_simulations):
-    try:
-        main()
-        n_success += 1
-    except:
-        pass
-print('total successes', n_success)
+p01 = DiscreteDistribution({'y': 0.2, 'n': 0.8})
+p10 = DiscreteDistribution({'y': 0.2, 'n': 0.8})
+p11   = DiscreteDistribution({'y': 0.2, 'n': 0.8})
+
+OC = ConditionalProbabilityTable([[0, 0, 0, 0.999],
+                                  [0, 0, 1, 0.001],
+                                  [0, 1, 0, 0.750],
+                                  [0, 1, 1, 0.250],
+                                  [1, 0, 0, 0.700],
+                                  [1, 0, 1, 0.300],
+                                  [1, 1, 0, 0.050],
+                                  [1, 1, 1, 0.950]], [BRCA1, BRCA2])
+
+
+
+
+
+
+
+
+
+
+
+
+# n_simulations = 300
+# n_success = 0
+# for i in range(n_simulations):
+#     try:
+#         main()
+#         n_success += 1
+#     except:
+#         pass
+# print('total successes', n_success)
 
 # # test basic
 # action = Action(randint(1, 6))
