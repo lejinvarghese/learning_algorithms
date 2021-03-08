@@ -1,4 +1,5 @@
 from itertools import chain
+import pandas as pd
 from environment.environment import (
     Action,
     Percept,
@@ -11,7 +12,7 @@ import numpy as np
 from agent.agent import Agent, BeelineAgent
 from beeline_world import main
 import matplotlib.pyplot as plt
-from pomegranate import BayesianNetwork, DiscreteDistribution, ConditionalProbabilityTable, Node
+from pomegranate import BayesianNetwork, DiscreteDistribution, ConditionalProbabilityTable, Node, State
 from pomegranate.utils import plot_networkx
 from itertools import product
 from scipy.spatial.distance import cdist
@@ -29,7 +30,7 @@ nodes = {}
 breezes = {}
 
 
-_positions = [(0, 0)]
+_positions = [(0, 0), (0, 1)]
 
 
 def get_neighborhood_percepts(position, grid_width, grid_height, pit_proba=0.2):
@@ -61,35 +62,71 @@ def get_neighborhood_percepts(position, grid_width, grid_height, pit_proba=0.2):
 
     def _get_pits_nodes_breezes(position, neighbors):
         _pits, _nodes, _breezes = {}, {}, {}
-        for cell in neighbors:
-            _pits[cell] = DiscreteDistribution(
+        for n_loc in neighbors:
+            _pits[n_loc] = DiscreteDistribution(
                 {1: pit_proba, 0: 1 - pit_proba})
-            _nodes[cell] = Node(_pits[cell], name=cell)
+            _nodes[n_loc] = State(_pits[n_loc], name=n_loc)
 
         _x, _y = position
-        _breezes[str(_x)+'_'+str(_y)] = ConditionalProbabilityTable(
-            _get_cpt(n_neighbors=len(neighbors)), [_pits[cell] for cell in neighbors])
+        p_loc = str(_x)+'_'+str(_y)
+        _breezes[p_loc] = ConditionalProbabilityTable(
+            _get_cpt(n_neighbors=len(neighbors)), [_pits[n_loc] for n_loc in neighbors])
+        _nodes[p_loc] = State(_breezes[p_loc], name=p_loc)
         return _pits, _nodes, _breezes
 
     return _get_pits_nodes_breezes(position, _neighbors)
 
 
-print(get_neighborhood_percepts((0, 0), grid_width, grid_height, 0.2))
+model = BayesianNetwork("pits and breezes")
 
 
-# model.predict_proba([{'guest': 'A', 'monty': 'C'}])
-for x, y in product(range(grid_width), range(grid_height)):
-    pits[str(x)+'_'+str(y)] = DiscreteDistribution({1: 0.2, 0: 0.8})
-    nodes[str(x)+'_'+str(y)] = Node(pits[str(x) +
-                                         '_'+str(y)], name=str(x)+'_'+str(y))
+def update_model(model, pits, nodes, breezes):
+    for state in nodes:
+        model.add_states(nodes[state])
+    # for pit, breeze in list(product(list(pits.values()), list(breezes.values()))):
+    #     model.add_edge(breeze, pit)
+    for pit in list(pits.keys()):
+        for breeze in list(breezes.keys()):
+            model.add_edge(nodes[pit], nodes[breeze])
+        # model.bake()
+    return model
 
 
-for x, y in product(range(grid_width), range(grid_height)):
+for _loc in _positions:
+    p, n, b = get_neighborhood_percepts(_loc, grid_width, grid_height, 0.2)
+    model = update_model(model, p, n, b)
+    model.bake()
+
+breeze_locations = {'0_0': 1}
+state_names = [state.name for state in model.states]
+neighborhood_locations = [
+    item for item in state_names if item not in breeze_locations.keys()]
+print(neighborhood_locations)
+
+# .get('parameters').get("1"))  # [-1].parameters[0][1])
+predictions = list(model.predict_proba([breeze_locations])[0])
+
+# print(list(filter(lambda state: state, predictions)))
+# get("parameters", None))  # .get("1", None))
+# print([x for x in predictions][0].parameters[0][1])
+x = []
+for i, s in enumerate(state_names):
     try:
-        breezes[str(x)+'_'+str(y)] = ConditionalProbabilityTable(generate_cpt_n(2),
-                                                                 [pits[str(x+1)+'_'+str(y)], pits[str(x)+'_'+str(y+1)]])
+        print(s, predictions[i].parameters[0][1])
     except:
         pass
+# for x, y in product(range(grid_width), range(grid_height)):
+#     pits[str(x)+'_'+str(y)] = DiscreteDistribution({1: 0.2, 0: 0.8})
+#     nodes[str(x)+'_'+str(y)] = Node(pits[str(x) +
+#                                          '_'+str(y)], name=str(x)+'_'+str(y))
+
+
+# for x, y in product(range(grid_width), range(grid_height)):
+#     try:
+#         breezes[str(x)+'_'+str(y)] = ConditionalProbabilityTable(generate_cpt_n(2),
+#                                                                  [pits[str(x+1)+'_'+str(y)], pits[str(x)+'_'+str(y+1)]])
+#     except:
+#         pass
 
 # print(breezes.keys(), len(breezes))
 

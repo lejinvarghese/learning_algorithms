@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from environment.environment import AgentState, Action, Coordinates, Direction
-import numpy as np
+import numpy as nppit
 import networkx as nx
 from scipy.spatial.distance import cdist
 from itertools import product
