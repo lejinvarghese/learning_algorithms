@@ -30,15 +30,15 @@ nodes = {}
 breezes = {}
 
 
-_positions = [(0, 0), (0, 1)]
+current_location = Coordinates(1, 1)
 
 
-def get_neighborhood_percepts(position, grid_width, grid_height, pit_proba=0.2):
+def get_neighborhood_percepts(position, grid_width, grid_height, breeze=False, pit_proba=0.2):
 
     def _get_neighbors(position, grid_width, grid_height):
-        _x, _y = position
+        _x, _y = position.x, position.y
         _neighbors = list(chain.from_iterable([[str(i)+"_"+str(j) for j in range(_y-1, _y+2) if (i >= 0) and (i < grid_width) and (j >= 0) and (
-            j < grid_height) and (cdist(np.array(position).reshape(1, -1), np.array((i, j)).reshape(1, -1), metric="cityblock") == 1)] for i in range(_x-1, _x+2)]))
+            j < grid_height) and (cdist(np.array((_x, _y)).reshape(1, -1), np.array((i, j)).reshape(1, -1), metric="cityblock") == 1)] for i in range(_x-1, _x+2)]))
         return _neighbors
 
     _neighbors = _get_neighbors(position, grid_width, grid_height)
@@ -67,54 +67,87 @@ def get_neighborhood_percepts(position, grid_width, grid_height, pit_proba=0.2):
                 {1: pit_proba, 0: 1 - pit_proba})
             _nodes[n_loc] = State(_pits[n_loc], name=n_loc)
 
-        _x, _y = position
+        _x, _y = position.x, position.y
         p_loc = str(_x)+'_'+str(_y)
         _breezes[p_loc] = ConditionalProbabilityTable(
             _get_cpt(n_neighbors=len(neighbors)), [_pits[n_loc] for n_loc in neighbors])
         _nodes[p_loc] = State(_breezes[p_loc], name=p_loc)
         return _pits, _nodes, _breezes
 
-    return _get_pits_nodes_breezes(position, _neighbors)
+    _pits, _nodes, _breezes = _get_pits_nodes_breezes(position, _neighbors)
+
+    def _get_model(pits, nodes, breezes):
+        model = BayesianNetwork("pits and breezes")
+        for state in nodes:
+            model.add_states(nodes[state])
+        for pit in list(pits.keys()):
+            for breeze in list(breezes.keys()):
+                model.add_edge(nodes[pit], nodes[breeze])
+        model.bake()
+        return model
+
+    model = _get_model(_pits, _nodes, _breezes)
+
+    def _get_pit_post_proba(position, neighbors, safe_locations, breeze, model):
+
+        _position = str(position.x) + '_' + str(position.y)
+        _safe_locations = [str(loc.x) + '_' + str(loc.y)
+                           for loc in safe_locations]
+        _state_names = [state.name for state in model.states]
+        _neighborhood_locations = {
+            item for item in _state_names if (item not in _safe_locations) & (item not in [_position])}
+        _input_neighborhood = {
+            item: 0 for item in _state_names if (item in _safe_locations) & (item not in [_position])}
+        if breeze:
+            _input_neighborhood[_position] = 1
+        else:
+            _input_neighborhood[_position] = 0
+        _proba = model.predict_proba([_input_neighborhood])[0]
+        # print(_neighborhood_locations, _input_neighborhood)
+        # print(_proba)
+        return _proba
+
+    _safe_locations = [Coordinates(0, 0)]
+    _p = _get_pit_post_proba(position, _neighbors,
+                             _safe_locations, breeze, model)
+    _p = [x.parameters for x in _p if type(x)==dict]
+    print(_p)
+    return _p
 
 
-model = BayesianNetwork("pits and breezes")
-
-
-def update_model(model, pits, nodes, breezes):
-    for state in nodes:
-        model.add_states(nodes[state])
-    # for pit, breeze in list(product(list(pits.values()), list(breezes.values()))):
-    #     model.add_edge(breeze, pit)
-    for pit in list(pits.keys()):
-        for breeze in list(breezes.keys()):
-            model.add_edge(nodes[pit], nodes[breeze])
-        # model.bake()
-    return model
-
-
-for _loc in _positions:
-    p, n, b = get_neighborhood_percepts(_loc, grid_width, grid_height, 0.2)
-    model = update_model(model, p, n, b)
-    model.bake()
-
-breeze_locations = {'0_0': 1}
-state_names = [state.name for state in model.states]
-neighborhood_locations = [
-    item for item in state_names if item not in breeze_locations.keys()]
-print(neighborhood_locations)
-
+get_neighborhood_percepts(current_location, grid_width,
+                          grid_height, breeze=False)
 # .get('parameters').get("1"))  # [-1].parameters[0][1])
-predictions = list(model.predict_proba([breeze_locations])[0])
+# predictions = list(model.predict_proba([breeze_locations])[0])
+
 
 # print(list(filter(lambda state: state, predictions)))
 # get("parameters", None))  # .get("1", None))
 # print([x for x in predictions][0].parameters[0][1])
-x = []
-for i, s in enumerate(state_names):
-    try:
-        print(s, predictions[i].parameters[0][1])
-    except:
-        pass
+# x = []
+# for i, s in enumerate(state_names):
+#     try:
+#         print(s, predictions[i].parameters[0][1])
+#     except:
+#         pass
+# for x, y in product(range(grid_width), range(grid_height)):
+#     pits[str(x)+'_'+str(y)] = DiscreteDistribution({1: 0.2, 0: 0.8})
+#     nodes[str(x)+'_'+str(y)] = Node(pits[str(x) +
+#                                          '_'+str(y)], name=str(x)+'_'+str(y))
+
+
+# for x, y in product(range(grid_width), range(grid_height)):
+#     try:
+#         bree
+# print(list(filter(lambda state: state, predictions)))
+# get("parameters", None))  # .get("1", None))
+# print([x for x in predictions][0].parameters[0][1])
+# x = []
+# for i, s in enumerate(state_names):
+#     try:
+#         print(s, predictions[i].parameters[0][1])
+#     except:
+#         pass
 # for x, y in product(range(grid_width), range(grid_height)):
 #     pits[str(x)+'_'+str(y)] = DiscreteDistribution({1: 0.2, 0: 0.8})
 #     nodes[str(x)+'_'+str(y)] = Node(pits[str(x) +
