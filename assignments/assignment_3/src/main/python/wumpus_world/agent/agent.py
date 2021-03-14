@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from environment.environment import AgentState, Action, Coordinates, Direction
-import numpy as nppit
+import numpy as np
 import networkx as nx
 from scipy.spatial.distance import cdist
 from itertools import product
@@ -19,12 +19,12 @@ class NaiveAgent:
 
 class BeelineAgent:
     def __init__(
-        self, grid_width, grid_height, agent_state, safe_locations, beeline_action_list
+        self, grid_width, grid_height, agent_state, visited_locations, beeline_action_list
     ):
         self.grid_width = grid_width
         self.grid_height = grid_height
         self.agent_state = agent_state
-        self.safe_locations = safe_locations
+        self.visited_locations = visited_locations
         self.beeline_action_list = beeline_action_list
 
     def __copy__(self):
@@ -32,22 +32,22 @@ class BeelineAgent:
             self.grid_width,
             self.grid_height,
             self.agent_state,
-            self.safe_locations,
+            self.visited_locations,
             self.beeline_action_list,
         )
 
     def _show(self):
         print(
-            f"beeline agent state: {self.agent_state.show()} \n safe locations: {self.safe_locations} \n beeline action list: {self.beeline_action_list}"
+            f"agent state: {self.agent_state.show()} \n safe locations: {self.visited_locations} \n action list: {self.beeline_action_list}"
         )
 
     def _construct_beeline_plan(self):
 
         def _construct_beeline_path(self):
-            _safe_locations = list(self.safe_locations)
-            _safe_locations.extend([self.agent_state.location])
+            _visited_locations = list(self.visited_locations)
+            _visited_locations.extend([self.agent_state.location])
             G = nx.Graph()
-            for node in _safe_locations:
+            for node in _visited_locations:
                 G.add_node((node.x, node.y))
             for x, y in list(product(G.nodes, G.nodes)):
                 if (
@@ -158,10 +158,10 @@ class BeelineAgent:
                 _new_agent_state = new_agent.agent_state.forward(
                     self.grid_width, self.grid_height
                 )
-                _new_safe_locations_l = list(self.safe_locations)
-                _new_safe_locations_l.extend([_new_agent_state.location])
+                _new_visited_locations_l = list(self.visited_locations)
+                _new_visited_locations_l.extend([_new_agent_state.location])
                 new_agent.agent_state = _new_agent_state
-                new_agent.safe_locations = set(_new_safe_locations_l)
+                new_agent.visited_locations = set(_new_visited_locations_l)
                 _action = Action.forward
             elif _rand_number == 2:
                 new_agent = BeelineAgent.__copy__(self)
@@ -182,3 +182,37 @@ class BeelineAgent:
 
 def initialize_beeline_agent(grid_width, grid_height):
     return BeelineAgent(grid_width, grid_height, AgentState(), set([Coordinates(0, 0)]), [])
+
+
+class ProbabilisticAgent(BeelineAgent):
+    def __init__(
+        self, grid_width, grid_height, agent_state, visited_locations, beeline_action_list, breeze_locations, stench_locations, heard_scream, inferred_pit_probs, inferred_wumpus_probs
+    ):
+        self.grid_width = grid_width
+        self.grid_height = grid_height
+        self.agent_state = agent_state
+        self.visited_locations = visited_locations
+        self.beeline_action_list = beeline_action_list
+        self.breeze_locations = breeze_locations
+        self.stench_locations = stench_locations
+        self.heard_scream = heard_scream
+        self.inferred_pit_probs = inferred_pit_probs
+        self.inferred_wumpus_probs = inferred_wumpus_probs
+
+    def __copy__(self):
+        return ProbabilisticAgent(
+            self.grid_width,
+            self.grid_height,
+            self.agent_state,
+            self.visited_locations,
+            self.beeline_action_list,
+            self.breeze_locations,
+            self.stench_locations,
+            self.heard_scream,
+            self.inferred_pit_probs,
+            self.inferred_wumpus_probs
+        )
+
+
+def initialize_probabilistic_agent(grid_width, grid_height):
+    return ProbabilisticAgent(grid_width, grid_height, AgentState(), set([Coordinates(0, 0)]), [])
