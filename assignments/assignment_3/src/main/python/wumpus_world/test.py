@@ -30,7 +30,7 @@ nodes = {}
 breezes = {}
 
 
-def get_neighborhood_percepts(position, grid_width, grid_height, safe_locations, inferred_pit_probs, breeze=False, pit_proba=0.2):
+def get_neighborhood_percepts(position, grid_width, grid_height, visited_locations, inferred_pit_probs, breeze=False, pit_proba=0.2):
 
     def _get_neighbors(position, grid_width, grid_height):
         _x, _y = position.x, position.y
@@ -85,14 +85,22 @@ def get_neighborhood_percepts(position, grid_width, grid_height, safe_locations,
 
     model = _get_model(_pits, _nodes, _breezes)
 
+    def _get_safe_locations(visited_locations, inferred_pit_probs, tolerance = 0.5*pit_proba):
+        _visited_locations = set([str(loc.x) + '_' + str(loc.y) for loc in visited_locations])
+        _inferred_pit_probs = set([key for key, value in inferred_pit_probs.items() if value<tolerance])
+        _safe_locations = _inferred_pit_probs.union(_visited_locations)
+        print(_safe_locations, _visited_locations, _inferred_pit_probs)
+        return _safe_locations
+
+
     def _get_pit_post_proba(position, neighbors, model, safe_locations):
 
         _position = str(position.x) + '_' + str(position.y)
-        _safe_locations = [str(loc.x) + '_' + str(loc.y)
-                           for loc in safe_locations]
+        # _safe_locations = [str(loc.x) + '_' + str(loc.y)
+        #                    for loc in safe_locations]
         _state_names = [state.name for state in model.states]
         _input_neighborhood = {
-            item: 0 for item in _state_names if (item in _safe_locations) & (item not in [_position])}
+            item: 0 for item in _state_names if (item in list(_safe_locations)) & (item not in [_position])}
 
         if breeze:
             _input_neighborhood[_position] = 1
@@ -104,21 +112,21 @@ def get_neighborhood_percepts(position, grid_width, grid_height, safe_locations,
 
         _proba = [{neighbors[i]: round(x.parameters[0].get(1), 2)}
                   for i, x in enumerate(_proba) if isinstance(x, DiscreteDistribution)]
+        _proba = dict((key, val) for k in _proba for key, val in k.items())
         return _proba
 
+    _safe_locations = _get_safe_locations(visited_locations, inferred_pit_probs)
     inferred_pit_probs = _get_pit_post_proba(
-        position, _neighbors, model, safe_locations)
-
+        position, _neighbors, model, _safe_locations)
     print(inferred_pit_probs)
     return inferred_pit_probs
 
-
-inferred_pit_probs = 1
-current_location = Coordinates(1, 0)
-safe_locations = [Coordinates(0, 0)]
+current_location = Coordinates(1, 1)
+visited_locations = [Coordinates(0, 0), Coordinates(1, 0)]
+inferred_pit_probs = {'0_0': 0, '1_1': 0.56, '2_0': 0.56}#, '3_0': 0.55}
 
 get_neighborhood_percepts(current_location, grid_width,
-                          grid_height, safe_locations, inferred_pit_probs, breeze=True)
+                          grid_height, visited_locations, inferred_pit_probs, breeze=False)
 # .get('parameters').get("1"))  # [-1].parameters[0][1])
 # predictions = list(model.predict_proba([breeze_locations])[0])
 
