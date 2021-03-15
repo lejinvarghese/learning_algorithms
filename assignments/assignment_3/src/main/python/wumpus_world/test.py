@@ -29,7 +29,7 @@ pits = {}
 nodes = {}
 breezes = {}
 
-print(True & False)
+print(set([Coordinates(0, 0), Coordinates(0, 0), Coordinates(0, 0)]))
 
 
 def get_neighborhood_percepts(position, grid_width, grid_height, visited_locations, inferred_pit_probs, breeze=False, pit_proba=0.2):

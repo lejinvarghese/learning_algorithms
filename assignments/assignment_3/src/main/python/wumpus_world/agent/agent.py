@@ -5,6 +5,7 @@ import networkx as nx
 from scipy.spatial.distance import cdist
 from itertools import product, chain
 from pomegranate import BayesianNetwork, DiscreteDistribution, ConditionalProbabilityTable, Node, State
+import random
 
 
 class Agent:
@@ -217,19 +218,21 @@ class ProbabilisticAgent(BeelineAgent):
 
     def _get_neighbors(self):
         x, y = self.agent_state.location.x, self.agent_state.location.y
-        neighbors = list(chain.from_iterable([[str(i)+"_"+str(j) for j in range(y-1, y+2) if (i >= 0) and (i < self.grid_width) and (j >= 0) and (
-            j < self.grid_height) and (cdist(np.array((x, y)).reshape(1, -1), np.array((i, j)).reshape(1, -1), metric="cityblock") == 1)] for i in range(x-1, x+2)]))
+        neighbors = list(chain.from_iterable([[str(i)+"_"+str(j) for j in range(y-1, y+2) if (i >= 0) and (i < self.grid_height) and (j >= 0) and (
+            j < self.grid_width) and (cdist(np.array((x, y)).reshape(1, -1), np.array((i, j)).reshape(1, -1), metric="cityblock") == 1)] for i in range(x-1, x+2)]))
         return neighbors
 
     def _get_safe_locations(self):
-        tolerance = 0.15
+        tolerance = 0.10
         _visited_locations = set([str(loc.x) + '_' + str(loc.y)
                                   for loc in self.visited_locations])
         _inferred_pit_probs = set(
-            [key for key, value in self.inferred_pit_probs.items() if value < tolerance])
+            [key for key, value in dict(self.inferred_pit_probs).items() if value < tolerance])
+
+        _inferred_wumpus_probs = set(
+            [key for key, value in dict(self.inferred_wumpus_probs).items() if value < tolerance])
         _safe_locations = _inferred_pit_probs.union(_visited_locations)
-        # _inferred_wumpus_probs
-        print(_safe_locations, _visited_locations, _inferred_pit_probs)
+        _safe_locations = _inferred_wumpus_probs.union(_safe_locations)
         return _safe_locations
 
     def _get_breeze_cpt(self):
@@ -293,21 +296,109 @@ class ProbabilisticAgent(BeelineAgent):
             input_neighbors[loc] = 0
 
         inferred_pit_probs = model.predict_proba([input_neighbors])[0]
-        print(inferred_pit_probs)
 
         inferred_pit_probs = [{neighbors[i]: round(x.parameters[0].get(1), 2)}
                               for i, x in enumerate(inferred_pit_probs) if isinstance(x, DiscreteDistribution)]
         inferred_pit_probs = dict((key, val)
                                   for k in inferred_pit_probs for key, val in k.items())
+
+        for loc in list(safe_locations):
+            if loc in neighbors:
+                inferred_pit_probs[loc] = 0.0
+
+        print(f"inferred pit probabilities >> {inferred_pit_probs}")
         return inferred_pit_probs
 
+    def _construct_plan_from_forward_path(self, forward_path):
+        active_orientation = self.agent_state.orientation.orientation
+        actions = []
+        cur_pos_x,  cur_pos_y = self.agent_state.location.x, self.agent_state.location.y
+
+        for node in forward_path:
+            nxt_pos_x,  nxt_pos_y = node  # reversed?
+            if cur_pos_x < nxt_pos_x:  # go east
+                if active_orientation == Direction.east:
+                    actions = [Action.forward]
+                elif active_orientation == Direction.north:
+                    actions = [Action.turn_right, Action.forward]
+                elif active_orientation == Direction.west:
+                    actions = [Action.turn_right,
+                               Action.turn_right, Action.forward]
+                elif active_orientation == Direction.south:
+                    actions = [Action.turn_left, Action.forward]
+                active_orientation = Direction.east
+            elif cur_pos_x > nxt_pos_x:  # go west
+                if active_orientation == Direction.west:
+                    actions = [Action.forward]
+                elif active_orientation == Direction.north:
+                    actions = [Action.turn_left, Action.forward]
+                elif active_orientation == Direction.east:
+                    actions = [Action.turn_left,
+                               Action.turn_left, Action.forward]
+                elif active_orientation == Direction.south:
+                    actions = [Action.turn_right, Action.forward]
+                active_orientation = Direction.west
+            elif cur_pos_y < nxt_pos_y:  # go north
+                if active_orientation == Direction.north:
+                    actions = [Action.forward]
+                elif active_orientation == Direction.west:
+                    actions = [Action.turn_right, Action.forward]
+                elif active_orientation == Direction.south:
+                    actions = [Action.turn_right,
+                               Action.turn_right, Action.forward]
+                elif active_orientation == Direction.east:
+                    actions = [Action.turn_left, Action.forward]
+                active_orientation = Direction.north
+            elif cur_pos_y > nxt_pos_y:  # go south
+                if active_orientation == Direction.south:
+                    actions = [Action.forward]
+                elif active_orientation == Direction.west:
+                    actions = [Action.turn_left, Action.forward]
+                elif active_orientation == Direction.north:
+                    actions = [Action.turn_left,
+                               Action.turn_left, Action.forward]
+                elif active_orientation == Direction.east:
+                    actions = [Action.turn_right, Action.forward]
+                active_orientation = Direction.south
+
+        return actions
+
+    def get_forward_plan(self, inferred_pit_probs, inferred_wumpus_probs):
+        neighborhood_proba = inferred_pit_probs.copy()
+        neighbors = self._get_neighbors()
+        neighborhood_proba = {n: neighborhood_proba[n]
+                              for n in neighbors}
+
+        if not neighborhood_proba:
+            forward_path = tuple(int(i)
+                                 for i in random.choice(neighbors).split('_'))
+        else:
+            neighborhood_choice = neighborhood_proba
+            _rand_number = np.random.randint(low=1, high=10)
+            if _rand_number > 2:
+                try:
+                    neighborhood_choice = dict((key, value)
+                                               for key, value in neighborhood_proba.items() if value < 0.2)
+                except:
+                    neighborhood_choice = neighborhood_proba
+                try:
+                    forward_path = tuple(int(i) for i in random.choice(
+                        list(neighborhood_choice.keys())).split('_'))
+                except:
+                    pass
+            forward_path = tuple(int(i)
+                                 for i in random.choice(neighbors).split('_'))
+        forward_plan = self._construct_plan_from_forward_path([forward_path])
+        return forward_plan
+
     def next_action(self, percept):
-        visiting_new_location = not(any([(self.agent_state.location.x == _loc.x) & (
-            self.agent_state.location.y == _loc.y) for _loc in self.visited_locations]))
+        visiting_new_location = not(any([(self.agent_state.location.x == loc.x) & (
+            self.agent_state.location.y == loc.y) for loc in self.visited_locations]))
         new_visited_locations = self.visited_locations.copy()
         new_visited_locations.add(
             self.agent_state.location)
         new_breeze_locations = self.breeze_locations.copy()
+
         if percept.breeze:
             new_breeze_locations.add(
                 self.agent_state.location)
@@ -316,9 +407,13 @@ class ProbabilisticAgent(BeelineAgent):
             new_stench_locations.add(
                 self.agent_state.location)
         new_heard_scream = self.heard_scream | percept.scream
+        new_inferred_pit_probs = self.inferred_pit_probs.copy()
+        new_inferred_wumpus_probs = self.inferred_wumpus_probs.copy()
 
-        new_inferred_pit_probs = self._get_pit_post_proba(percept)
-        print('new_inferred_pit_probs', new_inferred_pit_probs)
+        if (visiting_new_location) & (not(percept.glitter)):
+            new_inferred_pit_probs.update(self._get_pit_post_proba(percept))
+            # if not(percept.scream):
+            #     new_inferred_wumpus_probs = self._get_wumpus_post_proba(percept)
 
         if self.agent_state.has_gold:
             if (self.agent_state.location.x == 0) & (self.agent_state.location.y == 0):
@@ -331,44 +426,54 @@ class ProbabilisticAgent(BeelineAgent):
                     else self.beeline_action_list
                 )
                 _action = _beeline_plan[0]
-                new_agent = BeelineAgent.__copy__(self)
+                new_agent = self.__copy__()
                 new_agent.agent_state = new_agent.agent_state.apply_move_action(
                     _action, self.grid_width, self.grid_height
                 )
                 new_agent.beeline_action_list = _beeline_plan[1:]
 
         elif percept.glitter:
-            new_agent = BeelineAgent.__copy__(self)
+            new_agent = self.__copy__()
             new_agent.agent_state.has_gold = True
             _action = Action.grab
+        elif (percept.stench) & (self.agent_state.has_arrow):
+            new_agent = self.__copy__()
+            new_agent.agent_state.has_arrow = False
+            _action = Action.shoot
         else:
-            _rand_number = np.random.randint(low=1, high=5)
-            if _rand_number == 1:
-                new_agent = BeelineAgent.__copy__(self)
-                _new_agent_state = new_agent.agent_state.forward(
-                    self.grid_width, self.grid_height
-                )
-                _new_visited_locations_l = list(self.visited_locations)
-                _new_visited_locations_l.extend([_new_agent_state.location])
-                new_agent.agent_state = _new_agent_state
-                new_agent.visited_locations = set(_new_visited_locations_l)
-                _action = Action.forward
-            elif _rand_number == 2:
-                new_agent = BeelineAgent.__copy__(self)
-                new_agent.agent_state = new_agent.agent_state.turn_left()
-                _action = Action.turn_left
-            elif _rand_number == 3:
-                _new_agent_state = self.agent_state.turn_right()
-                new_agent = BeelineAgent.__copy__(self)
-                new_agent.agent_state = _new_agent_state
-                _action = Action.turn_right
-            elif _rand_number == 4:
-                new_agent = BeelineAgent.__copy__(self)
-                new_agent.agent_state.use_arrow()
-                _action = Action.shoot
+            _beeline_plan = (
+                self.get_forward_plan(
+                    new_inferred_pit_probs, new_inferred_wumpus_probs)
+                if not self.beeline_action_list
+                else self.beeline_action_list
+            )
+            _action = _beeline_plan[0]
+            new_agent = self.__copy__()
+            new_agent.agent_state = new_agent.agent_state.apply_move_action(
+                _action, self.grid_width, self.grid_height
+            )
+            new_agent.beeline_action_list = _beeline_plan[1:]
+            # _rand_number = np.random.randint(low=1, high=5)
+            # if _action == Action.forward:
+            #     _new_agent_state = new_agent.agent_state.forward(
+            #         self.grid_width, self.grid_height
+            #     )
+            #     new_agent.agent_state = _new_agent_state
+            # elif _action == Action.turn_left:
+            #     new_agent.agent_state = new_agent.agent_state.turn_left()
+            # elif _action == Action.turn_right:
+            #     new_agent.agent_state = new_agent.agent_state.turn_right()
+            # elif _action == Action.shoot:
+            #     new_agent.agent_state.use_arrow()
 
+        new_agent.visited_locations = new_visited_locations
+        new_agent.breeze_locations = new_breeze_locations
+        new_agent.stench_locations = new_stench_locations
+        new_agent.heard_scream = new_heard_scream
+        new_agent.inferred_pit_probs = new_inferred_pit_probs
+        new_agent.inferred_wumpus_probs = new_inferred_wumpus_probs
         return new_agent, _action
 
 
 def initialize_probabilistic_agent(grid_width, grid_height):
-    return ProbabilisticAgent(grid_width, grid_height, AgentState(), visited_locations=set([Coordinates(0, 0)]), beeline_action_list=[], breeze_locations=set(), stench_locations=set(), heard_scream=False, pit_proba=0.2, inferred_pit_probs=set(), inferred_wumpus_probs=set())
+    return ProbabilisticAgent(grid_width, grid_height, AgentState(), visited_locations=set(), beeline_action_list=[], breeze_locations=set(), stench_locations=set(), heard_scream=False, pit_proba=0.2, inferred_pit_probs=dict(), inferred_wumpus_probs=dict())
