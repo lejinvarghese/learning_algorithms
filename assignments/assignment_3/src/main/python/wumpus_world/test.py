@@ -37,8 +37,8 @@ model = BayesianNetwork("Monty Hall Problem")
 model.add_states(s1, s3)
 model.add_edge(s1, s3)
 model.bake()
-# print(model.predict([['0_1',  None]]))
-print(model.predict_proba({'1_0': 1}))
+print(model.predict([['0_1',  None]]))
+# print(model.predict_proba({'1_0': 1}))
 # grid_width, grid_height = 4, 4
 # pits = {}
 # nodes = {}
