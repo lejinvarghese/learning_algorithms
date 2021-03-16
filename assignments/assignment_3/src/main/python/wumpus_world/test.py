@@ -21,14 +21,18 @@ filterwarnings("ignore")
 
 
 p01 = BernoulliDistribution(0.2)
-
-# print(p01)
+arr = np.array([[1, 0, 1], [0, 1, 0]])
+x = np.transpose(np.count_nonzero(
+    arr == 1, axis=1))
+x[x > 1] = 0
+print(x)
+print(np.max(arr, axis=1))
 
 wl = DiscreteDistribution({'0_1': 0.2, '1_0': .8})
 
 w_cpt = ConditionalProbabilityTable(
-    [['0_1',  True, 1.0], ['0_1',  False, 0.0],
-     ['1_0',  True, 0.0], ['1_0',  False, 1.0], ], [wl])
+    [['0_1',  1, 1.0], ['0_1',  0, 0.0],
+     ['1_0',  1, 0.0], ['1_0',  0, 1.0], ], [wl])
 
 s1 = State(wl, name="wl")
 s3 = State(w_cpt, name="w_cpt")
@@ -37,8 +41,10 @@ model = BayesianNetwork("Monty Hall Problem")
 model.add_states(s1, s3)
 model.add_edge(s1, s3)
 model.bake()
-print(model.predict([['0_1',  None]]))
-# print(model.predict_proba({'1_0': 1}))
+# print(model.predict([['0_1',  None]]))
+x = model.predict_proba({'0_1': 1})
+for _ in x:
+    print(x[0])
 # grid_width, grid_height = 4, 4
 # pits = {}
 # nodes = {}

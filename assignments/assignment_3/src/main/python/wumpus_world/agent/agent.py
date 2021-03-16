@@ -230,7 +230,7 @@ class ProbabilisticAgent(BeelineAgent):
             [key for key, value in dict(self.inferred_pit_probs).items() if value < tolerance])
 
         _inferred_wumpus_probs = set(
-            [key for key, value in dict(self.inferred_wumpus_probs).items() if value < tolerance])
+            [key for key, value in dict(self.inferred_wumpus_probs).items() if value < 1./15])
         _safe_locations = _inferred_pit_probs.union(_visited_locations)
         _safe_locations = _inferred_wumpus_probs.union(_safe_locations)
         return _safe_locations
@@ -265,13 +265,33 @@ class ProbabilisticAgent(BeelineAgent):
                                 for x in list(np.binary_repr(i, width=n_neighbors))])
             cpt = np.vstack((cpt, bin_rep))
 
-        any_pit = np.max(cpt[:, :n_neighbors-1], axis=1)
-        any_breeze = cpt[:, -1]
+        cpt_i = cpt[:, :n_neighbors-1]
+        any_wumpus = np.count_nonzero(
+            cpt_i == 1, axis=1)
+        any_wumpus[any_wumpus > 1] = 0
+        any_stench = cpt[:, -1]
 
-        _proba = np.expand_dims(np.invert(np.logical_xor(
-            any_pit, any_breeze)).astype(float), axis=1)
+        _proba = np.expand_dims(np.logical_and(
+            any_wumpus, any_stench).astype(float), axis=1)
         cpt = np.hstack((cpt, _proba))
-        return cpt
+
+        # additional inputs that are needed
+        cpt_wl, cells = [], []
+        for x in range(self.grid_width):
+            for y in range(self.grid_height):
+                curr_pos = str(self.agent_state.location.x) + \
+                    '_' + str(self.agent_state.location.y)
+                curr_cell = str(x) + "_" + str(y)
+                cells.append(curr_cell)
+
+                if curr_pos == curr_cell:
+                    cpt_wl.append([curr_cell,  1.0, 1.0])
+                    cpt_wl.append([curr_cell,  0.0, 0.0])
+                else:
+                    cpt_wl.append([curr_cell,  1.0, 0.0])
+                    cpt_wl.append([curr_cell,  0.0, 1.0])
+
+        return cpt_wl, cpt, set(cells)
 
     def _get_breeze_model(self):
         neighbors = self._get_neighbors()
@@ -294,6 +314,35 @@ class ProbabilisticAgent(BeelineAgent):
         for pit in list(pits.keys()):
             for breeze in list(breezes.keys()):
                 model.add_edge(nodes[pit], nodes[breeze])
+        model.bake()
+        return model
+
+    def _get_wumpus_model(self):
+        cpt_0, cpt_1, cells = self._get_wumpus_cpt()
+        neighbors = self._get_neighbors()
+        wumpuses, nodes, stenches = {}, {}, {}
+        wumpus_location = DiscreteDistribution(
+            {i: 1./((self.grid_width * self.grid_height) - 1) for i in cells})
+
+        nodes['wumpus_location'] = State(
+            wumpus_location, name='wumpus_location')
+        for n_loc in neighbors:
+            wumpuses[n_loc] = ConditionalProbabilityTable(
+                cpt_0, [wumpus_location])
+            nodes[n_loc] = State(wumpuses[n_loc], name=n_loc)
+
+        loc = str(self.agent_state.location.x)+'_' + \
+            str(self.agent_state.location.y)
+        stenches[loc] = ConditionalProbabilityTable(
+            cpt_1, [wumpuses[n_loc] for n_loc in neighbors])
+        nodes[loc] = State(stenches[loc], name=loc)
+        model = BayesianNetwork("wumpuses and stenches")
+        for state in nodes:
+            model.add_states(nodes[state])
+        for wumpus in list(wumpuses.keys()):
+            for stench in list(stenches.keys()):
+                model.add_edge(nodes['wumpus_location'], nodes[wumpus])
+                model.add_edge(nodes[wumpus], nodes[stench])
         model.bake()
         return model
 
@@ -327,6 +376,38 @@ class ProbabilisticAgent(BeelineAgent):
 
         print(f"inferred pit probabilities >> {inferred_pit_probs}")
         return inferred_pit_probs
+
+    def _get_wumpus_post_proba(self, percept):
+        loc = str(self.agent_state.location.x)+'_' + \
+            str(self.agent_state.location.y)
+
+        model = self._get_wumpus_model()
+        safe_locations = self._get_safe_locations()
+        state_names = [state.name for state in model.states]
+
+        neighbors = self._get_neighbors()
+
+        input_neighbors = {
+            item: 0 for item in state_names if (item in list(safe_locations)) & (item not in [loc])}
+
+        if percept.stench:
+            input_neighbors[loc] = 1
+        else:
+            input_neighbors[loc] = 0
+
+        inferred_wumpus_probs = model.predict_proba([input_neighbors])[0]
+
+        inferred_wumpus_probs = inferred_wumpus_probs[0].parameters
+
+        inferred_wumpus_probs = dict((key, np.round(val, 2))
+                                     for k in inferred_wumpus_probs for key, val in k.items())
+
+        # for loc in list(safe_locations):
+        #     if loc in neighbors:
+        #         inferred_wumpus_probs[loc] = 0.0
+
+        print(f"inferred wumpus probabilities >> {inferred_wumpus_probs}")
+        return inferred_wumpus_probs
 
     def _construct_plan_from_forward_path(self, forward_path):
         active_orientation = self.agent_state.orientation.orientation
@@ -431,8 +512,9 @@ class ProbabilisticAgent(BeelineAgent):
 
         if (visiting_new_location) & (not(percept.glitter)):
             new_inferred_pit_probs.update(self._get_pit_post_proba(percept))
-            # if not(percept.scream):
-            #     new_inferred_wumpus_probs = self._get_wumpus_post_proba(percept)
+            # if not(new_heard_scream):
+            new_inferred_wumpus_probs.update(self._get_wumpus_post_proba(
+                percept))
 
         if self.agent_state.has_gold:
             if (self.agent_state.location.x == 0) & (self.agent_state.location.y == 0):
