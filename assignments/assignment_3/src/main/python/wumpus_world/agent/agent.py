@@ -254,6 +254,25 @@ class ProbabilisticAgent(BeelineAgent):
         cpt = np.hstack((cpt, _proba))
         return cpt
 
+    def _get_wumpus_cpt(self):
+        neighbors = self._get_neighbors()
+        n_neighbors = len(neighbors)
+        n_neighbors += 1
+        cpt = np.zeros(n_neighbors)
+
+        for i in range(1, 2**n_neighbors):
+            bin_rep = np.array([int(x)
+                                for x in list(np.binary_repr(i, width=n_neighbors))])
+            cpt = np.vstack((cpt, bin_rep))
+
+        any_pit = np.max(cpt[:, :n_neighbors-1], axis=1)
+        any_breeze = cpt[:, -1]
+
+        _proba = np.expand_dims(np.invert(np.logical_xor(
+            any_pit, any_breeze)).astype(float), axis=1)
+        cpt = np.hstack((cpt, _proba))
+        return cpt
+
     def _get_breeze_model(self):
         neighbors = self._get_neighbors()
         pits, nodes, breezes = {}, {}, {}
