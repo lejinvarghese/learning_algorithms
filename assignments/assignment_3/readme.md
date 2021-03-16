@@ -5,7 +5,14 @@
 ```python
 cd src/main/python/wumpus_world
 pip install -r requirements.txt
-python3 beeline_world.py
+python3 probabilistic_world.py
+```
+
+To obtain mean scores of a 1000 simulations:
+```python
+cd src/main/python/wumpus_world
+pip install -r requirements.txt
+python3 simulator.py
 ```
 
 ## Guide
@@ -18,6 +25,12 @@ python3 beeline_world.py
 
 ## Results
 
+### Probabilistic Simulations
+Mean scores of a 1000 simulations on multiple trials hovers between -500 and -570.
+
+![1](assets/simulations.png)
+
+### Beeline
 An example of a succesful run, agent climbs out from (0, 0) after grabbing the gold, and beelining for the exit.
 
 ![1](assets/screenshot_1.png)
