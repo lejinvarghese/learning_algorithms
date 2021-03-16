@@ -31,6 +31,7 @@ def main():
     total_reward = run_episode(
         initial_environment, agent, initial_percept)
     print("total_reward: ", total_reward)
+    return total_reward
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ import numpy as np
 import networkx as nx
 from scipy.spatial.distance import cdist
 from itertools import product, chain
-from pomegranate import BayesianNetwork, DiscreteDistribution, ConditionalProbabilityTable, Node, State
+from pomegranate import BayesianNetwork, BernoulliDistribution, DiscreteDistribution, ConditionalProbabilityTable, Node, State
 import random
 
 
@@ -475,19 +475,21 @@ class ProbabilisticAgent(BeelineAgent):
         else:
             neighborhood_choice = neighborhood_proba
             _rand_number = np.random.randint(low=1, high=10)
-            if _rand_number > 2:
+            if _rand_number > 1:
                 try:
                     neighborhood_choice = dict((key, value)
-                                               for key, value in neighborhood_proba.items() if value < 0.2)
+                                               for key, value in neighborhood_proba.items() if value < 0.1)
                 except:
                     neighborhood_choice = neighborhood_proba
                 try:
                     forward_path = tuple(int(i) for i in random.choice(
                         list(neighborhood_choice.keys())).split('_'))
                 except:
-                    pass
-            forward_path = tuple(int(i)
-                                 for i in random.choice(neighbors).split('_'))
+                    forward_path = tuple(int(i)
+                                         for i in random.choice(neighbors).split('_'))
+            else:
+                forward_path = tuple(int(i)
+                                     for i in random.choice(neighbors).split('_'))
         forward_plan = self._construct_plan_from_forward_path([forward_path])
         return forward_plan
 
@@ -512,9 +514,9 @@ class ProbabilisticAgent(BeelineAgent):
 
         if (visiting_new_location) & (not(percept.glitter)):
             new_inferred_pit_probs.update(self._get_pit_post_proba(percept))
-            # if not(new_heard_scream):
-            new_inferred_wumpus_probs.update(self._get_wumpus_post_proba(
-                percept))
+            if not(new_heard_scream):
+                new_inferred_wumpus_probs.update(self._get_wumpus_post_proba(
+                    percept))
 
         if self.agent_state.has_gold:
             if (self.agent_state.location.x == 0) & (self.agent_state.location.y == 0):

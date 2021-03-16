@@ -10,7 +10,7 @@ from environment.environment import (
 )
 import numpy as np
 from agent.agent import Agent, BeelineAgent
-from beeline_world import main
+from probabilistic_world import main
 import matplotlib.pyplot as plt
 from pomegranate import BayesianNetwork, DiscreteDistribution, ConditionalProbabilityTable, Node, State, BernoulliDistribution, UniformDistribution
 from pomegranate.utils import plot_networkx
@@ -19,32 +19,42 @@ from scipy.spatial.distance import cdist
 from warnings import filterwarnings
 filterwarnings("ignore")
 
+n_simulations = 30
+n_success = 0
+rewards = []
+for i in range(n_simulations):
+    try:
+        rewards.append(main())
+    except:
+        pass
+print(f'mean reward: ', {np.mean(rewards)},
+      'median reward: ', {np.median(rewards)})
 
-p01 = BernoulliDistribution(0.2)
-arr = np.array([[1, 0, 1], [0, 1, 0]])
-x = np.transpose(np.count_nonzero(
-    arr == 1, axis=1))
-x[x > 1] = 0
-print(x)
-print(np.max(arr, axis=1))
+# p01 = BernoulliDistribution(0.2)
+# arr = np.array([[1, 0, 1], [0, 1, 0]])
+# x = np.transpose(np.count_nonzero(
+#     arr == 1, axis=1))
+# x[x > 1] = 0
+# print(x)
+# print(np.max(arr, axis=1))
 
-wl = DiscreteDistribution({'0_1': 0.2, '1_0': .8})
+# wl = DiscreteDistribution({'0_1': 0.2, '1_0': .8})
 
-w_cpt = ConditionalProbabilityTable(
-    [['0_1',  1, 1.0], ['0_1',  0, 0.0],
-     ['1_0',  1, 0.0], ['1_0',  0, 1.0], ], [wl])
+# w_cpt = ConditionalProbabilityTable(
+#     [['0_1',  1, 1.0], ['0_1',  0, 0.0],
+#      ['1_0',  1, 0.0], ['1_0',  0, 1.0], ], [wl])
 
-s1 = State(wl, name="wl")
-s3 = State(w_cpt, name="w_cpt")
+# s1 = State(wl, name="wl")
+# s3 = State(w_cpt, name="w_cpt")
 
-model = BayesianNetwork("Monty Hall Problem")
-model.add_states(s1, s3)
-model.add_edge(s1, s3)
-model.bake()
-# print(model.predict([['0_1',  None]]))
-x = model.predict_proba({'0_1': 1})
-for _ in x:
-    print(x[0])
+# model = BayesianNetwork("Monty Hall Problem")
+# model.add_states(s1, s3)
+# model.add_edge(s1, s3)
+# model.bake()
+# # print(model.predict([['0_1',  None]]))
+# x = model.predict_proba({'0_1': 1})
+# for _ in x:
+#     print(x[0])
 # grid_width, grid_height = 4, 4
 # pits = {}
 # nodes = {}
@@ -221,15 +231,6 @@ for _ in x:
 
 # print(model.predict_proba([{'b00': 1}]))
 
-# n_simulations = 300
-# n_success = 0
-# for i in range(n_simulations):
-#     try:
-#         main()
-#         n_success += 1
-#     except:
-#         pass
-# print('total successes', n_success)
 
 # # test basic
 # action = Action(randint(1, 6))
