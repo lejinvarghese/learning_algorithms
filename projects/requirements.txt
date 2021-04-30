@@ -1,0 +1,6 @@
+opencv-python
+pillow
+gym
+keras-rl2
+keras==2.2.0
+wandb
