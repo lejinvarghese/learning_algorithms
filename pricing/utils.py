@@ -17,7 +17,7 @@ from pylab import cycler
 
 warnings.filterwarnings("ignore")
 plt.rcParams['font.family'] = 'sans-serif'
-plt.rcParams['font.sans-serif'] = 'Adobe Clean'
+plt.rcParams['font.sans-serif'] = 'Ubuntu'
 plt.rcParams['axes.prop_cycle'] = cycler(color=['r', 'g', 'b', 'y'])
 pd.set_option('display.max_columns', None)
 
