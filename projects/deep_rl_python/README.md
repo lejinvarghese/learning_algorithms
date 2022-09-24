@@ -1,7 +1,7 @@
 # Deep Reinforcement Learning with Python
 
-[`GitHub Repository`](https://github.com/PacktPublishing/Deep-Reinforcement-Learning-with-Python)
-[`Book`](https://www.goodreads.com/book/show/55537133-deep-reinforcement-learning-with-python)
+- [`GitHub Repository`](https://github.com/PacktPublishing/Deep-Reinforcement-Learning-with-Python)
+- [`Book`](https://www.goodreads.com/book/show/55537133-deep-reinforcement-learning-with-python)
 
 ## Getting Started
 
@@ -20,5 +20,5 @@ sudo apt-get install golang libcupti-dev libjpeg-turbo8-dev make tmux htop chrom
 
 conda install pip six libgcc swig
 conda install opencv
-pip install gym==0.26.1
+pip install gym\[all\]
 ```
