@@ -13,7 +13,9 @@ Projects around rule based agents as well learning agents:
 
 1.[`Dynamic Pricing using Deep Q Networks`](/pricing/dqn_pricing.ipynb)
 ![x](https://github.com/lejinvarghese/reinforcement_learning/blob/main/pricing/sim.gif?raw=true)
+
 2. [`Super Mario Agent using Deep Q Networks`](/projects/readme.md)
-    ![x](https://drive.google.com/file/d/16FDkwufkFXJ3nz3HovG1C0GR6MV4uCH1/preview)
-3. [`Wumpus World Agent`](/assignments/assignment_3/)
-   ![x](/assignments/assignment_2/assets/screenshot_1.png)
+[![x](https://www.freeiconspng.com/thumbs/mario/-mario-super-transparent-background-0.png)](https://drive.google.com/file/d/16FDkwufkFXJ3nz3HovG1C0GR6MV4uCH1/preview)
+
+1. [`Wumpus World Agent`](/assignments/assignment_3/)
+![x](/assignments/assignment_2/assets/screenshot_1.png)
