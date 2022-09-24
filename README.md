@@ -1,6 +1,6 @@
 # Intelligent Agents & Reinforcement Learning
 
-![x](https://vitalflux.com/wp-content/uploads/2020/12/Reinforcement-learning-real-world-example.png)
+<img src="https://vitalflux.com/wp-content/uploads/2020/12/Reinforcement-learning-real-world-example.png)" alt="drawing" width="400"/>
 
 Projects around rule based agents as well learning agents:
 
@@ -9,3 +9,11 @@ Projects around rule based agents as well learning agents:
 - `Probabilistic Agents`
 - `Deep Q Network (RL) Agents`
 
+## Projects
+
+1.[`Dynamic Pricing using Deep Q Networks`](/pricing/dqn_pricing.ipynb)
+![x](https://github.com/lejinvarghese/reinforcement_learning/blob/main/pricing/sim.gif?raw=true)
+2. [`Super Mario Agent using Deep Q Networks`](/projects/readme.md)
+    <iframe src="https://drive.google.com/file/d/16FDkwufkFXJ3nz3HovG1C0GR6MV4uCH1/preview" width="320" allow="autoplay" align="center"></iframe>
+3. [`Wumpus World Agent`](/assignments/assignment_3/)
+   ![x](/assignments/assignment_2/assets/screenshot_1.png)
