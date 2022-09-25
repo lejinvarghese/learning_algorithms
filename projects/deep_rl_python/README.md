@@ -20,5 +20,5 @@ sudo apt-get install golang libcupti-dev libjpeg-turbo8-dev make tmux htop chrom
 
 conda install pip six libgcc swig
 conda install opencv
-pip install gym\[all\]
+pip install gym\[all\]==0.26.1
 ```
