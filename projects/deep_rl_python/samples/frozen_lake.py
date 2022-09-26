@@ -15,9 +15,7 @@ if __name__ == "__main__":
         for t in range(n_timesteps):
             env.render()
             random_action = env.action_space.sample()
-            next_state, reward, terminated, truncated, info = env.step(
-                random_action
-            )
+            next_state, reward, terminated, truncated, info = env.step(random_action)
             episode_return += reward
             if terminated:
                 break

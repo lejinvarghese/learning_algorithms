@@ -1,5 +1,4 @@
 from typing import List
-from copy import deepcopy
 import numpy as np
 import gym
 
@@ -36,8 +35,7 @@ def compute_optimal_values(
             _q_states_actions = [
                 sum(
                     [
-                        trans_proba
-                        * (reward + gamma * _next_value_states[next_state])
+                        trans_proba * (reward + gamma * _next_value_states[next_state])
                         for trans_proba, next_state, reward, _ in env.P[s][a]
                     ]
                 )
@@ -45,10 +43,7 @@ def compute_optimal_values(
             ]
             _value_states[s] = np.round(max(_q_states_actions), 4)
 
-        if (
-            np.sum(np.fabs(_next_value_states - _value_states))
-            <= convergence_threshold
-        ):
+        if np.sum(np.fabs(_next_value_states - _value_states)) <= convergence_threshold:
             print(f"Value-iteration converged at iteration {i+1}.")
             break
 
@@ -90,8 +85,8 @@ if __name__ == "__main__":
     env = gym.make("FrozenLake-v1", render_mode="human")
     state = env.reset()
     total_returns = 0
-    optimal_value_states = deepcopy(compute_optimal_values(env))
-    optimal_policy = deepcopy(compute_optimal_policy(env, optimal_value_states))
+    optimal_value_states = compute_optimal_values(env)
+    optimal_policy = compute_optimal_policy(env, optimal_value_states)
     print(f"Optimal policy obtained through value iteration: {optimal_policy}")
 
     for e in range(n_episodes):
@@ -102,9 +97,7 @@ if __name__ == "__main__":
         for t in range(n_timesteps):
             env.render()
             next_action = int(optimal_policy[next_state])
-            next_state, reward, terminated, truncated, info = env.step(
-                next_action
-            )
+            next_state, reward, terminated, truncated, info = env.step(next_action)
 
             episode_return += reward
             if terminated:
@@ -118,8 +111,6 @@ if __name__ == "__main__":
 
         print(f"Agent obtained a return {episode_return}.")
 
-    print(
-        f"Agent obtained a total return {total_returns} in {n_episodes} episodes."
-    )
+    print(f"Agent obtained a total return {total_returns} in {n_episodes} episodes.")
 
     env.close()
