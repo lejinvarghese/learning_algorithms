@@ -18,4 +18,4 @@ jobs:
                   pip install pylint
             - name: Analysing the code with pylint
               run: |
-                  pylint `ls -R|grep .py$|xargs`
+                  pylint `ls -R|grep .py$|xargs` --disable=F0001,F0010,F0401
