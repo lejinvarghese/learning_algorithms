@@ -13,7 +13,7 @@ torchvision
 torchaudio
 bokeh
 ray
-tensorflow==2.10.0
+tensorflow==2.11.1
 jupyterlab
 dm_tree
 scikit-image
