@@ -1,0 +1,12 @@
+numpy
+pandas
+setuptools
+jupyterlab
+jupyterlab-widgets==3.0.7
+tqdm==4.65.0
+pygame[pre]
+tf-agents[reverb]
+gym
+tensorflow-macos==2.13.0-rc1
+matplotlib
+ipywidgets
