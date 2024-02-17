@@ -1,0 +1,4 @@
+numpy==1.26.4
+pandas==2.2.0
+captum==0.7.0
+ipykernel==6.29.2
