@@ -2,3 +2,9 @@ numpy==1.26.4
 pandas==2.2.0
 captum==0.7.0
 ipykernel==6.29.2
+spacy==3.7.4
+torchtext==0.17.0
+transformers==4.37.2
+sentencepiece==0.1.99
+protobuf==4.25.3
+portalocker==2.8.2
