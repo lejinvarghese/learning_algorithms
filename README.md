@@ -11,13 +11,16 @@ Projects around rule based agents as well learning agents:
 
 ## Projects
 
-1.[`Dynamic Pricing using Deep Q Networks`](/pricing/dqn_pricing.ipynb)
-![x](https://github.com/lejinvarghese/reinforcement_learning/blob/main/pricing/sim.gif?raw=true)
+1.[`Dynamic Pricing using Deep Q Networks`](/reinforcement_learning/pricing/dqn_pricing.ipynb)
 
-2. [`Super Mario Agent using Deep Q Networks`](/projects/mario/readme.md)
+<img src="/reinforcement_learning/pricing/sim.gif" alt="drawing" width="400"/>
+
+2. [`Super Mario Agent using Deep Q Networks`](/reinforcement_learning/mario/readme.md)
 
 - [`Training Video Preview`](https://drive.google.com/file/d/16FDkwufkFXJ3nz3HovG1C0GR6MV4uCH1/preview)
 <img src="https://www.freeiconspng.com/thumbs/mario/-mario-super-transparent-background-0.png" alt="drawing" width="200"/>
 
-3. [`Wumpus World Agent`](/assignments/assignment_3/)
-<img src="/assignments/assignment_2/assets/screenshot_1.png" alt="drawing" width="400"/>
+3. [`Wumpus World Agent`](/reinforcement_learning/wumpus_world/1_naive_agent/)
+<img src="/reinforcement_learning/wumpus_world/2_beeline_agent/assets/screenshot_1.png" alt="drawing" width="400"/>
+
+<img src="/reinforcement_learning/wumpus_world/4_dqn_agent/assets/loss.png" alt="drawing" width="400"/>
