@@ -12,11 +12,20 @@ import numpy as np
 from agent.agent import Agent, BeelineAgent
 from probabilistic_world import main
 import matplotlib.pyplot as plt
-from pomegranate import BayesianNetwork, DiscreteDistribution, ConditionalProbabilityTable, Node, State, BernoulliDistribution, UniformDistribution
+from pomegranate import (
+    BayesianNetwork,
+    DiscreteDistribution,
+    ConditionalProbabilityTable,
+    Node,
+    State,
+    BernoulliDistribution,
+    UniformDistribution,
+)
 from pomegranate.utils import plot_networkx
 from itertools import product
 from scipy.spatial.distance import cdist
 from warnings import filterwarnings
+
 filterwarnings("ignore")
 
 n_simulations = 30
@@ -27,8 +36,7 @@ for i in range(n_simulations):
         rewards.append(main())
     except:
         pass
-print(f'mean reward: ', {np.mean(rewards)},
-      'median reward: ', {np.median(rewards)})
+print(f"mean reward: ", {np.mean(rewards)}, "median reward: ", {np.median(rewards)})
 
 # p01 = BernoulliDistribution(0.2)
 # arr = np.array([[1, 0, 1], [0, 1, 0]])

@@ -16,5 +16,11 @@ def main_parallel(_):
 with Pool(n_cores) as pool:
     rewards = pool.map(main_parallel, range(n_simulations))
 
-print(f'simulations: ', n_simulations, 'mean reward: ', {np.round(np.mean(rewards), 2)},
-      'median reward: ', {np.median(rewards)})
+print(
+    f"simulations: ",
+    n_simulations,
+    "mean reward: ",
+    {np.round(np.mean(rewards), 2)},
+    "median reward: ",
+    {np.median(rewards)},
+)

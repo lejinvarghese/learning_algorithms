@@ -21,7 +21,7 @@ for i in range(n_simulations):
         n_success += 1
     except:
         pass
-print('total successes', n_success)
+print("total successes", n_success)
 
 # # test basic
 # action = Action(randint(1, 6))

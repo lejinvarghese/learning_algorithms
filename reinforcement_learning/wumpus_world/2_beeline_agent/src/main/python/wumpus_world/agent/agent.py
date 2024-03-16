@@ -42,7 +42,6 @@ class BeelineAgent:
         )
 
     def _construct_beeline_plan(self):
-
         def _construct_beeline_path(self):
             _safe_locations = list(self.safe_locations)
             _safe_locations.extend([self.agent_state.location])
@@ -59,12 +58,10 @@ class BeelineAgent:
                     == 1
                 ):
                     G.add_edges_from([(x, y)])
-            print(
-                f"no. of safe locations: {G.number_of_nodes()}")
+            print(f"no. of safe locations: {G.number_of_nodes()}")
             return nx.shortest_path(
                 G,
-                source=(self.agent_state.location.x,
-                        self.agent_state.location.y),
+                source=(self.agent_state.location.x, self.agent_state.location.y),
                 target=(0, 0),
             )
 
@@ -76,16 +73,19 @@ class BeelineAgent:
             beeline_actions = []
             for i, node in enumerate(beeline_path):
                 if i < len(beeline_path) - 1:
-                    cur_pos_x,  cur_pos_y = node
-                    nxt_pos_x,  nxt_pos_y = beeline_path[i+1]
+                    cur_pos_x, cur_pos_y = node
+                    nxt_pos_x, nxt_pos_y = beeline_path[i + 1]
                     if cur_pos_x < nxt_pos_x:  # go east
                         if active_orientation == Direction.east:
                             actions = [Action.forward]
                         elif active_orientation == Direction.north:
                             actions = [Action.turn_right, Action.forward]
                         elif active_orientation == Direction.west:
-                            actions = [Action.turn_right,
-                                       Action.turn_right, Action.forward]
+                            actions = [
+                                Action.turn_right,
+                                Action.turn_right,
+                                Action.forward,
+                            ]
                         elif active_orientation == Direction.south:
                             actions = [Action.turn_left, Action.forward]
                         active_orientation = Direction.east
@@ -95,8 +95,11 @@ class BeelineAgent:
                         elif active_orientation == Direction.north:
                             actions = [Action.turn_left, Action.forward]
                         elif active_orientation == Direction.east:
-                            actions = [Action.turn_left,
-                                       Action.turn_left, Action.forward]
+                            actions = [
+                                Action.turn_left,
+                                Action.turn_left,
+                                Action.forward,
+                            ]
                         elif active_orientation == Direction.south:
                             actions = [Action.turn_right, Action.forward]
                         active_orientation = Direction.west
@@ -106,8 +109,11 @@ class BeelineAgent:
                         elif active_orientation == Direction.west:
                             actions = [Action.turn_right, Action.forward]
                         elif active_orientation == Direction.south:
-                            actions = [Action.turn_right,
-                                       Action.turn_right, Action.forward]
+                            actions = [
+                                Action.turn_right,
+                                Action.turn_right,
+                                Action.forward,
+                            ]
                         elif active_orientation == Direction.east:
                             actions = [Action.turn_left, Action.forward]
                         active_orientation = Direction.north
@@ -117,14 +123,18 @@ class BeelineAgent:
                         elif active_orientation == Direction.west:
                             actions = [Action.turn_left, Action.forward]
                         elif active_orientation == Direction.north:
-                            actions = [Action.turn_left,
-                                       Action.turn_left, Action.forward]
+                            actions = [
+                                Action.turn_left,
+                                Action.turn_left,
+                                Action.forward,
+                            ]
                         elif active_orientation == Direction.east:
                             actions = [Action.turn_right, Action.forward]
                         active_orientation = Direction.south
                     for action in actions:
                         beeline_actions.extend([action])
             return beeline_actions
+
         _beeline_actions = _construct_plan_from_path(self, _beeline_path)
         print(f"beeline actions >> {_beeline_actions}")
         return _beeline_actions
@@ -181,4 +191,6 @@ class BeelineAgent:
 
 
 def initialize_beeline_agent(grid_width, grid_height):
-    return BeelineAgent(grid_width, grid_height, AgentState(), set([Coordinates(0, 0)]), [])
+    return BeelineAgent(
+        grid_width, grid_height, AgentState(), set([Coordinates(0, 0)]), []
+    )

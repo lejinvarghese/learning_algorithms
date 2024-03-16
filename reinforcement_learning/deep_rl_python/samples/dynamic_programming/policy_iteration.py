@@ -43,16 +43,12 @@ def compute_value_function(
             a = policy[s]
             _value_states[s] = sum(
                 [
-                    trans_proba
-                    * (reward + gamma * _next_value_states[next_state])
+                    trans_proba * (reward + gamma * _next_value_states[next_state])
                     for trans_proba, next_state, reward, _ in env.P[s][a]
                 ]
             )
 
-        if (
-            np.sum(np.fabs(_next_value_states - _value_states))
-            <= convergence_threshold
-        ):
+        if np.sum(np.fabs(_next_value_states - _value_states)) <= convergence_threshold:
             break
 
     return np.round(_value_states, 4)
@@ -107,9 +103,7 @@ if __name__ == "__main__":
         for t in range(n_timesteps):
             env.render()
             next_action = int(optimal_policy[next_state])
-            next_state, reward, terminated, truncated, info = env.step(
-                next_action
-            )
+            next_state, reward, terminated, truncated, info = env.step(next_action)
 
             episode_return += reward
             if terminated:
@@ -123,8 +117,6 @@ if __name__ == "__main__":
 
         print(f"Agent obtained a return {episode_return}.")
 
-    print(
-        f"Agent obtained a total return {total_returns} in {n_episodes} episodes."
-    )
+    print(f"Agent obtained a total return {total_returns} in {n_episodes} episodes.")
 
     env.close()

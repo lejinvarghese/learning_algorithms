@@ -80,7 +80,10 @@ for i in range(epochs):
         epsilon = 0.1
 
     next_environment, initial_percept = initialize_environment(
-        grid_width=grid_width, grid_height=grid_height, pit_proba=pit_proba, allow_climb_without_gold=False
+        grid_width=grid_width,
+        grid_height=grid_height,
+        pit_proba=pit_proba,
+        allow_climb_without_gold=False,
     )
     print("pit ", pit_proba)
     state1_ = next_environment.agent.q_transform()  # + np.random.rand(1, 72)/100.0

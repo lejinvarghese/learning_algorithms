@@ -24,10 +24,13 @@ class MarioWorld(Env):
         self.observation_space = spaces.Box(
             low=np.zeros(self.observation_shape),
             high=np.ones(self.observation_shape),
-            dtype=np.float16)
+            dtype=np.float16,
+        )
 
         # Define an action space
-        self.action_space = spaces.Discrete(9, )
+        self.action_space = spaces.Discrete(
+            9,
+        )
 
         # Create a canvas to render the environment images
         self.canvas = np.ones(self.observation_shape) * 1
@@ -54,7 +57,7 @@ class MarioWorld(Env):
             5: "North-West",
             6: "South-East",
             7: "South-West",
-            8: "Do Nothing"
+            8: "Do Nothing",
         }
         return actions.get(action)
 
@@ -65,12 +68,13 @@ class MarioWorld(Env):
         for elem in self.elements:
             elem_shape = elem.icon.shape
             x, y = elem.x, elem.y
-            self.canvas[y:y + elem_shape[1], x:x + elem_shape[0]] = elem.icon
+            self.canvas[y : y + elem_shape[1], x : x + elem_shape[0]] = elem.icon
 
         # Add text info on the canvas
         text = f" Fuel: {self.fuel_left} | Rewards: {self.ep_return} | Lives: {self.life_count}"
-        self.canvas = cv2.putText(self.canvas, text, (10, 20), font, 0.6,
-                                  (0, 0, 0), 1, cv2.LINE_AA)
+        self.canvas = cv2.putText(
+            self.canvas, text, (10, 20), font, 0.6, (0, 0, 0), 1, cv2.LINE_AA
+        )
 
     def reset(self):
         # Reset the fuel consumed
@@ -86,14 +90,15 @@ class MarioWorld(Env):
         self.action_buffer = deque(maxlen=10)
 
         # Determine a place to intialise the mario in
-        x = random.randrange(int(self.observation_shape[0] * 0.05),
-                             int(self.observation_shape[0] * 0.10))
-        y = random.randrange(int(self.observation_shape[1] * 0.15),
-                             int(self.observation_shape[1] * 0.20))
+        x = random.randrange(
+            int(self.observation_shape[0] * 0.05), int(self.observation_shape[0] * 0.10)
+        )
+        y = random.randrange(
+            int(self.observation_shape[1] * 0.15), int(self.observation_shape[1] * 0.20)
+        )
 
         # Intialise the mario
-        self.mario = Mario("mario", self.x_max, self.x_min, self.y_max,
-                           self.y_min)
+        self.mario = Mario("mario", self.x_max, self.x_min, self.y_max, self.y_min)
         self.mario.set_position(x, y)
 
         # Intialise the elements
@@ -159,9 +164,13 @@ class MarioWorld(Env):
         # Spawn a bullet at the right edge with given probability
         if random.random() < ITEM_PROBABILITY:
 
-            spawned_bullet = Bullet("bullet_{}".format(self.bullet_count),
-                                    self.x_max, self.x_min, self.y_max,
-                                    self.y_min)
+            spawned_bullet = Bullet(
+                "bullet_{}".format(self.bullet_count),
+                self.x_max,
+                self.x_min,
+                self.y_max,
+                self.y_min,
+            )
             self.bullet_count += 1
             bullet_x = self.x_max
             bullet_y = random.randrange(self.y_min, self.y_max)
@@ -170,8 +179,13 @@ class MarioWorld(Env):
 
         # Spawn fuel at the bottom edge with given probability ITEM_PROBABILITY
         if random.random() < ITEM_PROBABILITY / 2:
-            spawned_fuel = Fuel("fuel_{}".format(self.bullet_count),
-                                self.x_max, self.x_min, self.y_max, self.y_min)
+            spawned_fuel = Fuel(
+                "fuel_{}".format(self.bullet_count),
+                self.x_max,
+                self.x_min,
+                self.y_max,
+                self.y_min,
+            )
             self.fuel_count += 1
             fuel_x = random.randrange(self.x_min, self.x_max)
             fuel_y = self.y_max
@@ -180,8 +194,13 @@ class MarioWorld(Env):
 
         # Spawn  life at the bottom edge with given probability ITEM_PROBABILITY
         if random.random() < ITEM_PROBABILITY / 4:
-            spawned_life = Life("life_{}".format(self.life_count), self.x_max,
-                                self.x_min, self.y_max, self.y_min)
+            spawned_life = Life(
+                "life_{}".format(self.life_count),
+                self.x_max,
+                self.x_min,
+                self.y_max,
+                self.y_min,
+            )
             life_x = random.randrange(self.x_min, self.x_max)
             life_y = self.y_max
             spawned_life.set_position(life_x, life_y)
@@ -277,7 +296,7 @@ class Point(object):
 class Mario(Point):
     def __init__(self, name, x_max, x_min, y_max, y_min):
         super(Mario, self).__init__(name, x_max, x_min, y_max, y_min)
-        self.icon = cv2.imread("assets/mario.jpg") / 255.
+        self.icon = cv2.imread("assets/mario.jpg") / 255.0
         self.icon_w = AGENT_SIZE
         self.icon_h = AGENT_SIZE
         self.icon = cv2.resize(self.icon, (self.icon_h, self.icon_w))
@@ -286,7 +305,7 @@ class Mario(Point):
 class Bullet(Point):
     def __init__(self, name, x_max, x_min, y_max, y_min):
         super(Bullet, self).__init__(name, x_max, x_min, y_max, y_min)
-        self.icon = cv2.imread("assets/bullet.png") / 255.
+        self.icon = cv2.imread("assets/bullet.png") / 255.0
         self.icon_w = ITEM_SIZE
         self.icon_h = ITEM_SIZE
         self.icon = cv2.resize(self.icon, (self.icon_h, self.icon_w))
@@ -295,7 +314,7 @@ class Bullet(Point):
 class Fuel(Point):
     def __init__(self, name, x_max, x_min, y_max, y_min):
         super(Fuel, self).__init__(name, x_max, x_min, y_max, y_min)
-        self.icon = cv2.imread("assets/fuel.jpg") / 255.
+        self.icon = cv2.imread("assets/fuel.jpg") / 255.0
         self.icon_w = ITEM_SIZE
         self.icon_h = ITEM_SIZE
         self.icon = cv2.resize(self.icon, (self.icon_h, self.icon_w))
@@ -304,7 +323,7 @@ class Fuel(Point):
 class Life(Point):
     def __init__(self, name, x_max, x_min, y_max, y_min):
         super(Life, self).__init__(name, x_max, x_min, y_max, y_min)
-        self.icon = cv2.imread("assets/life.jpg") / 255.
+        self.icon = cv2.imread("assets/life.jpg") / 255.0
         self.icon_w = ITEM_SIZE
         self.icon_h = ITEM_SIZE
         self.icon = cv2.resize(self.icon, (self.icon_h, self.icon_w))

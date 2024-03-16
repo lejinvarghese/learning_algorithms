@@ -4,7 +4,14 @@ import numpy as np
 import networkx as nx
 from scipy.spatial.distance import cdist
 from itertools import product, chain
-from pomegranate import BayesianNetwork, BernoulliDistribution, DiscreteDistribution, ConditionalProbabilityTable, Node, State
+from pomegranate import (
+    BayesianNetwork,
+    BernoulliDistribution,
+    DiscreteDistribution,
+    ConditionalProbabilityTable,
+    Node,
+    State,
+)
 import random
 
 
@@ -21,7 +28,12 @@ class NaiveAgent:
 
 class BeelineAgent:
     def __init__(
-        self, grid_width, grid_height, agent_state, visited_locations, beeline_action_list
+        self,
+        grid_width,
+        grid_height,
+        agent_state,
+        visited_locations,
+        beeline_action_list,
     ):
         self.grid_width = grid_width
         self.grid_height = grid_height
@@ -44,7 +56,6 @@ class BeelineAgent:
         )
 
     def _construct_beeline_plan(self):
-
         def _construct_beeline_path(self):
             _visited_locations = list(self.visited_locations)
             _visited_locations.extend([self.agent_state.location])
@@ -61,12 +72,10 @@ class BeelineAgent:
                     == 1
                 ):
                     G.add_edges_from([(x, y)])
-            print(
-                f"no. of safe locations: {G.number_of_nodes()}")
+            print(f"no. of safe locations: {G.number_of_nodes()}")
             return nx.shortest_path(
                 G,
-                source=(self.agent_state.location.x,
-                        self.agent_state.location.y),
+                source=(self.agent_state.location.x, self.agent_state.location.y),
                 target=(0, 0),
             )
 
@@ -78,16 +87,19 @@ class BeelineAgent:
             beeline_actions = []
             for i, node in enumerate(beeline_path):
                 if i < len(beeline_path) - 1:
-                    cur_pos_x,  cur_pos_y = node
-                    nxt_pos_x,  nxt_pos_y = beeline_path[i+1]
+                    cur_pos_x, cur_pos_y = node
+                    nxt_pos_x, nxt_pos_y = beeline_path[i + 1]
                     if cur_pos_x < nxt_pos_x:  # go east
                         if active_orientation == Direction.east:
                             actions = [Action.forward]
                         elif active_orientation == Direction.north:
                             actions = [Action.turn_right, Action.forward]
                         elif active_orientation == Direction.west:
-                            actions = [Action.turn_right,
-                                       Action.turn_right, Action.forward]
+                            actions = [
+                                Action.turn_right,
+                                Action.turn_right,
+                                Action.forward,
+                            ]
                         elif active_orientation == Direction.south:
                             actions = [Action.turn_left, Action.forward]
                         active_orientation = Direction.east
@@ -97,8 +109,11 @@ class BeelineAgent:
                         elif active_orientation == Direction.north:
                             actions = [Action.turn_left, Action.forward]
                         elif active_orientation == Direction.east:
-                            actions = [Action.turn_left,
-                                       Action.turn_left, Action.forward]
+                            actions = [
+                                Action.turn_left,
+                                Action.turn_left,
+                                Action.forward,
+                            ]
                         elif active_orientation == Direction.south:
                             actions = [Action.turn_right, Action.forward]
                         active_orientation = Direction.west
@@ -108,8 +123,11 @@ class BeelineAgent:
                         elif active_orientation == Direction.west:
                             actions = [Action.turn_right, Action.forward]
                         elif active_orientation == Direction.south:
-                            actions = [Action.turn_right,
-                                       Action.turn_right, Action.forward]
+                            actions = [
+                                Action.turn_right,
+                                Action.turn_right,
+                                Action.forward,
+                            ]
                         elif active_orientation == Direction.east:
                             actions = [Action.turn_left, Action.forward]
                         active_orientation = Direction.north
@@ -119,14 +137,18 @@ class BeelineAgent:
                         elif active_orientation == Direction.west:
                             actions = [Action.turn_left, Action.forward]
                         elif active_orientation == Direction.north:
-                            actions = [Action.turn_left,
-                                       Action.turn_left, Action.forward]
+                            actions = [
+                                Action.turn_left,
+                                Action.turn_left,
+                                Action.forward,
+                            ]
                         elif active_orientation == Direction.east:
                             actions = [Action.turn_right, Action.forward]
                         active_orientation = Direction.south
                     for action in actions:
                         beeline_actions.extend([action])
             return beeline_actions
+
         _beeline_actions = _construct_plan_from_path(self, _beeline_path)
         print(f"beeline actions >> {_beeline_actions}")
         return _beeline_actions
@@ -183,12 +205,26 @@ class BeelineAgent:
 
 
 def initialize_beeline_agent(grid_width, grid_height):
-    return BeelineAgent(grid_width, grid_height, AgentState(), set([Coordinates(0, 0)]), [])
+    return BeelineAgent(
+        grid_width, grid_height, AgentState(), set([Coordinates(0, 0)]), []
+    )
 
 
 class ProbabilisticAgent(BeelineAgent):
     def __init__(
-            self, grid_width, grid_height, agent_state, visited_locations, beeline_action_list, breeze_locations, stench_locations, heard_scream, pit_proba, inferred_pit_probs, inferred_wumpus_probs):
+        self,
+        grid_width,
+        grid_height,
+        agent_state,
+        visited_locations,
+        beeline_action_list,
+        breeze_locations,
+        stench_locations,
+        heard_scream,
+        pit_proba,
+        inferred_pit_probs,
+        inferred_wumpus_probs,
+    ):
         self.grid_width = grid_width
         self.grid_height = grid_height
         self.agent_state = agent_state
@@ -213,24 +249,56 @@ class ProbabilisticAgent(BeelineAgent):
             self.heard_scream,
             self.pit_proba,
             self.inferred_pit_probs,
-            self.inferred_wumpus_probs
+            self.inferred_wumpus_probs,
         )
 
     def _get_neighbors(self):
         x, y = self.agent_state.location.x, self.agent_state.location.y
-        neighbors = list(chain.from_iterable([[str(i)+"_"+str(j) for j in range(y-1, y+2) if (i >= 0) and (i < self.grid_height) and (j >= 0) and (
-            j < self.grid_width) and (cdist(np.array((x, y)).reshape(1, -1), np.array((i, j)).reshape(1, -1), metric="cityblock") == 1)] for i in range(x-1, x+2)]))
+        neighbors = list(
+            chain.from_iterable(
+                [
+                    [
+                        str(i) + "_" + str(j)
+                        for j in range(y - 1, y + 2)
+                        if (i >= 0)
+                        and (i < self.grid_height)
+                        and (j >= 0)
+                        and (j < self.grid_width)
+                        and (
+                            cdist(
+                                np.array((x, y)).reshape(1, -1),
+                                np.array((i, j)).reshape(1, -1),
+                                metric="cityblock",
+                            )
+                            == 1
+                        )
+                    ]
+                    for i in range(x - 1, x + 2)
+                ]
+            )
+        )
         return neighbors
 
     def _get_safe_locations(self):
         tolerance = 0.10
-        _visited_locations = set([str(loc.x) + '_' + str(loc.y)
-                                  for loc in self.visited_locations])
+        _visited_locations = set(
+            [str(loc.x) + "_" + str(loc.y) for loc in self.visited_locations]
+        )
         _inferred_pit_probs = set(
-            [key for key, value in dict(self.inferred_pit_probs).items() if value < tolerance])
+            [
+                key
+                for key, value in dict(self.inferred_pit_probs).items()
+                if value < tolerance
+            ]
+        )
 
         _inferred_wumpus_probs = set(
-            [key for key, value in dict(self.inferred_wumpus_probs).items() if value < 1./15])
+            [
+                key
+                for key, value in dict(self.inferred_wumpus_probs).items()
+                if value < 1.0 / 15
+            ]
+        )
         _safe_locations = _inferred_pit_probs.union(_visited_locations)
         _safe_locations = _inferred_wumpus_probs.union(_safe_locations)
         return _safe_locations
@@ -242,15 +310,17 @@ class ProbabilisticAgent(BeelineAgent):
         cpt = np.zeros(n_neighbors)
 
         for i in range(1, 2**n_neighbors):
-            bin_rep = np.array([int(x)
-                                for x in list(np.binary_repr(i, width=n_neighbors))])
+            bin_rep = np.array(
+                [int(x) for x in list(np.binary_repr(i, width=n_neighbors))]
+            )
             cpt = np.vstack((cpt, bin_rep))
 
-        any_pit = np.max(cpt[:, :n_neighbors-1], axis=1)
+        any_pit = np.max(cpt[:, : n_neighbors - 1], axis=1)
         any_breeze = cpt[:, -1]
 
-        _proba = np.expand_dims(np.invert(np.logical_xor(
-            any_pit, any_breeze)).astype(float), axis=1)
+        _proba = np.expand_dims(
+            np.invert(np.logical_xor(any_pit, any_breeze)).astype(float), axis=1
+        )
         cpt = np.hstack((cpt, _proba))
         return cpt
 
@@ -261,35 +331,39 @@ class ProbabilisticAgent(BeelineAgent):
         cpt = np.zeros(n_neighbors)
 
         for i in range(1, 2**n_neighbors):
-            bin_rep = np.array([int(x)
-                                for x in list(np.binary_repr(i, width=n_neighbors))])
+            bin_rep = np.array(
+                [int(x) for x in list(np.binary_repr(i, width=n_neighbors))]
+            )
             cpt = np.vstack((cpt, bin_rep))
 
-        cpt_i = cpt[:, :n_neighbors-1]
-        any_wumpus = np.count_nonzero(
-            cpt_i == 1, axis=1)
+        cpt_i = cpt[:, : n_neighbors - 1]
+        any_wumpus = np.count_nonzero(cpt_i == 1, axis=1)
         any_wumpus[any_wumpus > 1] = 0
         any_stench = cpt[:, -1]
 
-        _proba = np.expand_dims(np.logical_and(
-            any_wumpus, any_stench).astype(float), axis=1)
+        _proba = np.expand_dims(
+            np.logical_and(any_wumpus, any_stench).astype(float), axis=1
+        )
         cpt = np.hstack((cpt, _proba))
 
         # additional inputs that are needed
         cpt_wl, cells = [], []
         for x in range(self.grid_width):
             for y in range(self.grid_height):
-                curr_pos = str(self.agent_state.location.x) + \
-                    '_' + str(self.agent_state.location.y)
+                curr_pos = (
+                    str(self.agent_state.location.x)
+                    + "_"
+                    + str(self.agent_state.location.y)
+                )
                 curr_cell = str(x) + "_" + str(y)
                 cells.append(curr_cell)
 
                 if curr_pos == curr_cell:
-                    cpt_wl.append([curr_cell,  1.0, 1.0])
-                    cpt_wl.append([curr_cell,  0.0, 0.0])
+                    cpt_wl.append([curr_cell, 1.0, 1.0])
+                    cpt_wl.append([curr_cell, 0.0, 0.0])
                 else:
-                    cpt_wl.append([curr_cell,  1.0, 0.0])
-                    cpt_wl.append([curr_cell,  0.0, 1.0])
+                    cpt_wl.append([curr_cell, 1.0, 0.0])
+                    cpt_wl.append([curr_cell, 0.0, 1.0])
 
         return cpt_wl, cpt, set(cells)
 
@@ -299,13 +373,14 @@ class ProbabilisticAgent(BeelineAgent):
 
         for n_loc in neighbors:
             pits[n_loc] = DiscreteDistribution(
-                {1: self.pit_proba, 0: 1 - self.pit_proba})
+                {1: self.pit_proba, 0: 1 - self.pit_proba}
+            )
             nodes[n_loc] = State(pits[n_loc], name=n_loc)
 
-        loc = str(self.agent_state.location.x)+'_' + \
-            str(self.agent_state.location.y)
+        loc = str(self.agent_state.location.x) + "_" + str(self.agent_state.location.y)
         breezes[loc] = ConditionalProbabilityTable(
-            self._get_breeze_cpt(), [pits[n_loc] for n_loc in neighbors])
+            self._get_breeze_cpt(), [pits[n_loc] for n_loc in neighbors]
+        )
         nodes[loc] = State(breezes[loc], name=loc)
 
         model = BayesianNetwork("pits and breezes")
@@ -322,33 +397,31 @@ class ProbabilisticAgent(BeelineAgent):
         neighbors = self._get_neighbors()
         wumpuses, nodes, stenches = {}, {}, {}
         wumpus_location = DiscreteDistribution(
-            {i: 1./((self.grid_width * self.grid_height) - 1) for i in cells})
+            {i: 1.0 / ((self.grid_width * self.grid_height) - 1) for i in cells}
+        )
 
-        nodes['wumpus_location'] = State(
-            wumpus_location, name='wumpus_location')
+        nodes["wumpus_location"] = State(wumpus_location, name="wumpus_location")
         for n_loc in neighbors:
-            wumpuses[n_loc] = ConditionalProbabilityTable(
-                cpt_0, [wumpus_location])
+            wumpuses[n_loc] = ConditionalProbabilityTable(cpt_0, [wumpus_location])
             nodes[n_loc] = State(wumpuses[n_loc], name=n_loc)
 
-        loc = str(self.agent_state.location.x)+'_' + \
-            str(self.agent_state.location.y)
+        loc = str(self.agent_state.location.x) + "_" + str(self.agent_state.location.y)
         stenches[loc] = ConditionalProbabilityTable(
-            cpt_1, [wumpuses[n_loc] for n_loc in neighbors])
+            cpt_1, [wumpuses[n_loc] for n_loc in neighbors]
+        )
         nodes[loc] = State(stenches[loc], name=loc)
         model = BayesianNetwork("wumpuses and stenches")
         for state in nodes:
             model.add_states(nodes[state])
         for wumpus in list(wumpuses.keys()):
             for stench in list(stenches.keys()):
-                model.add_edge(nodes['wumpus_location'], nodes[wumpus])
+                model.add_edge(nodes["wumpus_location"], nodes[wumpus])
                 model.add_edge(nodes[wumpus], nodes[stench])
         model.bake()
         return model
 
     def _get_pit_post_proba(self, percept):
-        loc = str(self.agent_state.location.x)+'_' + \
-            str(self.agent_state.location.y)
+        loc = str(self.agent_state.location.x) + "_" + str(self.agent_state.location.y)
 
         model = self._get_breeze_model()
         safe_locations = self._get_safe_locations()
@@ -356,7 +429,10 @@ class ProbabilisticAgent(BeelineAgent):
         neighbors = self._get_neighbors()
 
         input_neighbors = {
-            item: 0 for item in state_names if (item in list(safe_locations)) & (item not in [loc])}
+            item: 0
+            for item in state_names
+            if (item in list(safe_locations)) & (item not in [loc])
+        }
 
         if percept.breeze:
             input_neighbors[loc] = 1
@@ -365,10 +441,14 @@ class ProbabilisticAgent(BeelineAgent):
 
         inferred_pit_probs = model.predict_proba([input_neighbors])[0]
 
-        inferred_pit_probs = [{neighbors[i]: round(x.parameters[0].get(1), 2)}
-                              for i, x in enumerate(inferred_pit_probs) if isinstance(x, DiscreteDistribution)]
-        inferred_pit_probs = dict((key, val)
-                                  for k in inferred_pit_probs for key, val in k.items())
+        inferred_pit_probs = [
+            {neighbors[i]: round(x.parameters[0].get(1), 2)}
+            for i, x in enumerate(inferred_pit_probs)
+            if isinstance(x, DiscreteDistribution)
+        ]
+        inferred_pit_probs = dict(
+            (key, val) for k in inferred_pit_probs for key, val in k.items()
+        )
 
         for loc in list(safe_locations):
             if loc in neighbors:
@@ -378,8 +458,7 @@ class ProbabilisticAgent(BeelineAgent):
         return inferred_pit_probs
 
     def _get_wumpus_post_proba(self, percept):
-        loc = str(self.agent_state.location.x)+'_' + \
-            str(self.agent_state.location.y)
+        loc = str(self.agent_state.location.x) + "_" + str(self.agent_state.location.y)
 
         model = self._get_wumpus_model()
         safe_locations = self._get_safe_locations()
@@ -388,7 +467,10 @@ class ProbabilisticAgent(BeelineAgent):
         neighbors = self._get_neighbors()
 
         input_neighbors = {
-            item: 0 for item in state_names if (item in list(safe_locations)) & (item not in [loc])}
+            item: 0
+            for item in state_names
+            if (item in list(safe_locations)) & (item not in [loc])
+        }
 
         if percept.stench:
             input_neighbors[loc] = 1
@@ -399,8 +481,11 @@ class ProbabilisticAgent(BeelineAgent):
 
         inferred_wumpus_probs = inferred_wumpus_probs[0].parameters
 
-        inferred_wumpus_probs = dict((key, np.round(val, 2))
-                                     for k in inferred_wumpus_probs for key, val in k.items())
+        inferred_wumpus_probs = dict(
+            (key, np.round(val, 2))
+            for k in inferred_wumpus_probs
+            for key, val in k.items()
+        )
 
         # for loc in list(safe_locations):
         #     if loc in neighbors:
@@ -412,18 +497,17 @@ class ProbabilisticAgent(BeelineAgent):
     def _construct_plan_from_forward_path(self, forward_path):
         active_orientation = self.agent_state.orientation.orientation
         actions = []
-        cur_pos_x,  cur_pos_y = self.agent_state.location.x, self.agent_state.location.y
+        cur_pos_x, cur_pos_y = self.agent_state.location.x, self.agent_state.location.y
 
         for node in forward_path:
-            nxt_pos_x,  nxt_pos_y = node  # reversed?
+            nxt_pos_x, nxt_pos_y = node  # reversed?
             if cur_pos_x < nxt_pos_x:  # go east
                 if active_orientation == Direction.east:
                     actions = [Action.forward]
                 elif active_orientation == Direction.north:
                     actions = [Action.turn_right, Action.forward]
                 elif active_orientation == Direction.west:
-                    actions = [Action.turn_right,
-                               Action.turn_right, Action.forward]
+                    actions = [Action.turn_right, Action.turn_right, Action.forward]
                 elif active_orientation == Direction.south:
                     actions = [Action.turn_left, Action.forward]
                 active_orientation = Direction.east
@@ -433,8 +517,7 @@ class ProbabilisticAgent(BeelineAgent):
                 elif active_orientation == Direction.north:
                     actions = [Action.turn_left, Action.forward]
                 elif active_orientation == Direction.east:
-                    actions = [Action.turn_left,
-                               Action.turn_left, Action.forward]
+                    actions = [Action.turn_left, Action.turn_left, Action.forward]
                 elif active_orientation == Direction.south:
                     actions = [Action.turn_right, Action.forward]
                 active_orientation = Direction.west
@@ -444,8 +527,7 @@ class ProbabilisticAgent(BeelineAgent):
                 elif active_orientation == Direction.west:
                     actions = [Action.turn_right, Action.forward]
                 elif active_orientation == Direction.south:
-                    actions = [Action.turn_right,
-                               Action.turn_right, Action.forward]
+                    actions = [Action.turn_right, Action.turn_right, Action.forward]
                 elif active_orientation == Direction.east:
                     actions = [Action.turn_left, Action.forward]
                 active_orientation = Direction.north
@@ -455,8 +537,7 @@ class ProbabilisticAgent(BeelineAgent):
                 elif active_orientation == Direction.west:
                     actions = [Action.turn_left, Action.forward]
                 elif active_orientation == Direction.north:
-                    actions = [Action.turn_left,
-                               Action.turn_left, Action.forward]
+                    actions = [Action.turn_left, Action.turn_left, Action.forward]
                 elif active_orientation == Direction.east:
                     actions = [Action.turn_right, Action.forward]
                 active_orientation = Direction.south
@@ -466,57 +547,67 @@ class ProbabilisticAgent(BeelineAgent):
     def get_forward_plan(self, inferred_pit_probs, inferred_wumpus_probs):
         neighborhood_proba = inferred_pit_probs.copy()
         neighbors = self._get_neighbors()
-        neighborhood_proba = {n: neighborhood_proba[n]
-                              for n in neighbors}
+        neighborhood_proba = {n: neighborhood_proba[n] for n in neighbors}
 
         if not neighborhood_proba:
-            forward_path = tuple(int(i)
-                                 for i in random.choice(neighbors).split('_'))
+            forward_path = tuple(int(i) for i in random.choice(neighbors).split("_"))
         else:
             neighborhood_choice = neighborhood_proba
             _rand_number = np.random.randint(low=1, high=10)
             if _rand_number > 1:
                 try:
-                    neighborhood_choice = dict((key, value)
-                                               for key, value in neighborhood_proba.items() if value < 0.1)
+                    neighborhood_choice = dict(
+                        (key, value)
+                        for key, value in neighborhood_proba.items()
+                        if value < 0.1
+                    )
                 except:
                     neighborhood_choice = neighborhood_proba
                 try:
-                    forward_path = tuple(int(i) for i in random.choice(
-                        list(neighborhood_choice.keys())).split('_'))
+                    forward_path = tuple(
+                        int(i)
+                        for i in random.choice(list(neighborhood_choice.keys())).split(
+                            "_"
+                        )
+                    )
                 except:
-                    forward_path = tuple(int(i)
-                                         for i in random.choice(neighbors).split('_'))
+                    forward_path = tuple(
+                        int(i) for i in random.choice(neighbors).split("_")
+                    )
             else:
-                forward_path = tuple(int(i)
-                                     for i in random.choice(neighbors).split('_'))
+                forward_path = tuple(
+                    int(i) for i in random.choice(neighbors).split("_")
+                )
         forward_plan = self._construct_plan_from_forward_path([forward_path])
         return forward_plan
 
     def next_action(self, percept):
-        visiting_new_location = not(any([(self.agent_state.location.x == loc.x) & (
-            self.agent_state.location.y == loc.y) for loc in self.visited_locations]))
+        visiting_new_location = not (
+            any(
+                [
+                    (self.agent_state.location.x == loc.x)
+                    & (self.agent_state.location.y == loc.y)
+                    for loc in self.visited_locations
+                ]
+            )
+        )
         new_visited_locations = self.visited_locations.copy()
-        new_visited_locations.add(
-            self.agent_state.location)
+        new_visited_locations.add(self.agent_state.location)
         new_breeze_locations = self.breeze_locations.copy()
 
         if percept.breeze:
-            new_breeze_locations.add(
-                self.agent_state.location)
+            new_breeze_locations.add(self.agent_state.location)
         new_stench_locations = self.stench_locations.copy()
         if percept.stench:
-            new_stench_locations.add(
-                self.agent_state.location)
+            new_stench_locations.add(self.agent_state.location)
         new_heard_scream = self.heard_scream | percept.scream
         new_inferred_pit_probs = self.inferred_pit_probs.copy()
         new_inferred_wumpus_probs = self.inferred_wumpus_probs.copy()
 
-        if (visiting_new_location) & (not(percept.glitter)):
+        if (visiting_new_location) & (not (percept.glitter)):
             new_inferred_pit_probs.update(self._get_pit_post_proba(percept))
-            if not(new_heard_scream):
-                new_inferred_wumpus_probs.update(self._get_wumpus_post_proba(
-                    percept))
+            if not (new_heard_scream):
+                new_inferred_wumpus_probs.update(self._get_wumpus_post_proba(percept))
 
         if self.agent_state.has_gold:
             if (self.agent_state.location.x == 0) & (self.agent_state.location.y == 0):
@@ -545,8 +636,7 @@ class ProbabilisticAgent(BeelineAgent):
             _action = Action.shoot
         else:
             _beeline_plan = (
-                self.get_forward_plan(
-                    new_inferred_pit_probs, new_inferred_wumpus_probs)
+                self.get_forward_plan(new_inferred_pit_probs, new_inferred_wumpus_probs)
                 if not self.beeline_action_list
                 else self.beeline_action_list
             )
@@ -579,4 +669,16 @@ class ProbabilisticAgent(BeelineAgent):
 
 
 def initialize_probabilistic_agent(grid_width, grid_height):
-    return ProbabilisticAgent(grid_width, grid_height, AgentState(), visited_locations=set(), beeline_action_list=[], breeze_locations=set(), stench_locations=set(), heard_scream=False, pit_proba=0.2, inferred_pit_probs=dict(), inferred_wumpus_probs=dict())
+    return ProbabilisticAgent(
+        grid_width,
+        grid_height,
+        AgentState(),
+        visited_locations=set(),
+        beeline_action_list=[],
+        breeze_locations=set(),
+        stench_locations=set(),
+        heard_scream=False,
+        pit_proba=0.2,
+        inferred_pit_probs=dict(),
+        inferred_wumpus_probs=dict(),
+    )

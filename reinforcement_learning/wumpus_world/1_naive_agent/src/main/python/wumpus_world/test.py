@@ -1,4 +1,10 @@
-from environment.environment import Action, Percept, Orientation, Coordinates, Environment
+from environment.environment import (
+    Action,
+    Percept,
+    Orientation,
+    Coordinates,
+    Environment,
+)
 import numpy as np
 from environment.agent import Agent
 

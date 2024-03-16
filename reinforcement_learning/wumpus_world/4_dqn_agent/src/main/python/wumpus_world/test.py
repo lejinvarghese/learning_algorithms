@@ -12,12 +12,21 @@ import numpy as np
 from agent.agent import Agent, BeelineAgent
 from probabilistic_world import main
 import matplotlib.pyplot as plt
-from pomegranate import BayesianNetwork, DiscreteDistribution, ConditionalProbabilityTable, Node, State, BernoulliDistribution, UniformDistribution
+from pomegranate import (
+    BayesianNetwork,
+    DiscreteDistribution,
+    ConditionalProbabilityTable,
+    Node,
+    State,
+    BernoulliDistribution,
+    UniformDistribution,
+)
 from pomegranate.utils import plot_networkx
 from itertools import product
 from scipy.spatial.distance import cdist
 from warnings import filterwarnings
 import torch
+
 filterwarnings("ignore")
 
 action_set = {
