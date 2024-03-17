@@ -46,20 +46,17 @@ def preprocess(args) -> Tuple[pd.DataFrame, pd.DataFrame]:
     )
 
     data["gain"] = data["esci_label"].apply(lambda x: gain_mapper[x])
+    train = data[data["split"] == "train"][cols]
     test = data[data["split"] == "test"][cols]
 
-    queries = data[data["split"] == "train"]["query_id"].unique()
+    queries = train["query_id"].unique()
     train_size = int(args.train_fraction * len(queries))
     queries_train, queries_valid = train_test_split(
         queries, train_size=train_size, random_state=args.random_state
     )
 
-    train = data[(data["split"] == "train") & (data["query_id"].isin(queries_train))][
-        cols
-    ]
-    valid = data[(data["split"] == "train") & (data["query_id"].isin(queries_valid))][
-        cols
-    ]
+    valid = train[train["query_id"].isin(queries_valid)]
+    train = train[train["query_id"].isin(queries_train)]
     logging.info(
         f"Train shape: {train.shape}, Valid shape: {valid.shape}, Test shape: {test.shape}"
     )
