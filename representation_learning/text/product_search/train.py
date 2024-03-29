@@ -24,7 +24,17 @@ logging.info(f"Using device: {device}")
 
 def preprocess(args) -> Tuple[pd.DataFrame, pd.DataFrame]:
     filters = [("small_version", "==", 1), ("product_locale", "==", "us")]
-    cols = ["query_id", "query", "product_title", "gain"]
+    cols = [
+        "query_id",
+        "query",
+        "product_id",
+        "product_title",
+        "product_description",
+        "product_bullet_point",
+        "product_brand",
+        "product_color",
+        "gain",
+    ]
     gain_mapper = {
         "E": 1.0,
         "S": 0.1,
@@ -45,7 +55,7 @@ def preprocess(args) -> Tuple[pd.DataFrame, pd.DataFrame]:
         on="product_id",
     )
 
-    data["gain"] = data["esci_label"].apply(lambda x: gain_mapper[x])
+    data["gain"] = data["esci_label"].apply(lambda x: gain_mapper.get(x, 0.0))
     train = data[data["split"] == "train"][cols]
     test = data[data["split"] == "test"][cols]
 
