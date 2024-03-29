@@ -1,5 +1,6 @@
 import os
-from typing import Tuple
+import click
+from typing import Tuple, Dict
 import logging
 import argparse
 
@@ -22,74 +23,84 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logging.info(f"Using device: {device}")
 
 
-def preprocess(args) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    filters = [("small_version", "==", 1), ("product_locale", "==", "us")]
-    cols = [
-        "query_id",
-        "query",
-        "product_id",
-        "product_title",
-        "product_description",
-        "product_bullet_point",
-        "product_brand",
-        "product_color",
-        "gain",
-    ]
-    gain_mapper = {
-        "E": 1.0,
-        "S": 0.1,
-        "C": 0.01,
-        "I": 0.0,
-    }
-    judgments = pd.read_parquet(
-        f"{DIRECTORY}/{SRC_PREFIX}_examples.parquet", filters=filters
-    )
-    products = pd.read_parquet(
-        f"{DIRECTORY}/{SRC_PREFIX}_products.parquet", filters=filters[1:]
-    )
+class Preprocessor:
+    def __init__(self, directory: str, src_prefix: str):
+        self.directory = directory
+        self.src_prefix = src_prefix
+        self.filters = [("small_version", "==", 1), ("product_locale", "==", "us")]
+        self.cols = [
+            "query_id",
+            "query",
+            "product_id",
+            "product_title",
+            "product_description",
+            "product_bullet_point",
+            "product_brand",
+            "product_color",
+            "gain",
+        ]
+        self.gain_mapper = {
+            "E": 1.0,
+            "S": 0.1,
+            "C": 0.01,
+            "I": 0.0,
+        }
 
-    data = pd.merge(
-        judgments,
-        products,
-        how="left",
-        on="product_id",
-    )
+    def load(self):
+        judgments = pd.read_parquet(
+            f"{self.directory}/{self.src_prefix}_examples.parquet", filters=self.filters
+        )
+        products = pd.read_parquet(
+            f"{self.directory}/{self.src_prefix}_products.parquet",
+            filters=self.filters[1:],
+        )
 
-    data["gain"] = data["esci_label"].apply(lambda x: gain_mapper.get(x, 0.0))
-    train = data[data["split"] == "train"][cols]
-    test = data[data["split"] == "test"][cols]
+        data = pd.merge(
+            judgments,
+            products,
+            how="left",
+            on="product_id",
+        )
 
-    queries = train["query_id"].unique()
-    train_size = int(args.train_fraction * len(queries))
-    queries_train, queries_valid = train_test_split(
-        queries, train_size=train_size, random_state=args.random_state
-    )
+        data["gain"] = data["esci_label"].apply(lambda x: self.gain_mapper.get(x, 0.0))
+        return data
 
-    valid = train[train["query_id"].isin(queries_valid)]
-    train = train[train["query_id"].isin(queries_train)]
-    logging.info(
-        f"Train shape: {train.shape}, Valid shape: {valid.shape}, Test shape: {test.shape}"
-    )
-    logging.info(train.head())
-    if args.cache:
-        train.to_parquet(f"{DIRECTORY}/train.parquet")
-        valid.to_parquet(f"{DIRECTORY}/valid.parquet")
-        test.to_parquet(f"{DIRECTORY}/test.parquet")
-    return train, test
+    def split(
+        self, data: pd.DataFrame, train_fraction: float = 0.8, random_state: int = 42
+    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        train = data[data["split"] == "train"][self.cols]
+        test = data[data["split"] == "test"][self.cols]
+
+        queries = train["query_id"].unique()
+        train_size = int(train_fraction * len(queries))
+        queries_train, queries_valid = train_test_split(
+            queries, train_size=train_size, random_state=random_state
+        )
+
+        valid = train[train["query_id"].isin(queries_valid)]
+        train = train[train["query_id"].isin(queries_train)]
+        logging.info(
+            f"Train shape: {train.shape}, Valid shape: {valid.shape}, Test shape: {test.shape}"
+        )
+        logging.info(train.head())
+        return {"train": train, "valid": valid, "test": test}
+
+    def save(self, data: Dict[str, pd.DataFrame]) -> None:
+        for k, v in data.items():
+            v.to_parquet(f"{self.directory}/{k}.parquet")
 
 
-def main(args):
-    preprocess(args)
+@click.command()
+@click.option("--train_fraction", type=float, default=0.8, help="Train fraction.")
+@click.option("--cache", type=bool, default=True, help="Cache datasets.")
+@click.option("--random_state", type=int, default=42, help="Random seed.")
+def main(train_fraction: float, cache: bool, random_state: int):
+    p = Preprocessor(directory=DIRECTORY, src_prefix=SRC_PREFIX)
+    data = p.load()
+    splits = p.split(data, train_fraction=train_fraction, random_state=random_state)
+    if cache:
+        p.save(splits)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--cache", type=bool, default=True, help="Cache datasets.")
-    parser.add_argument("--random_state", type=int, default=42, help="Random seed.")
-    parser.add_argument(
-        "--train_fraction", type=float, default=0.8, help="Train fraction."
-    )
-    parser.add_argument("--train_batch_size", type=int, default=32, help="Batch size.")
-    args = parser.parse_args()
-
-    main(args)
+    main()
