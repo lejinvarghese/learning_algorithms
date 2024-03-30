@@ -7,6 +7,7 @@ from sklearn.model_selection import train_test_split
 from constants import DIRECTORY, RANDOM_STATE
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class Preprocessor:
@@ -74,10 +75,10 @@ class Preprocessor:
 
         valid = train[train["query_id"].isin(queries_valid)]
         train = train[train["query_id"].isin(queries_train)]
-        logging.info(
+        logger.info(
             f"Train shape: {train.shape}, Valid shape: {valid.shape}, Test shape: {test.shape}"
         )
-        logging.info(train.head())
+        logger.info(train.head())
         return {"train": train, "valid": valid, "test": test}
 
     def save(self, datasets: Dict[str, pd.DataFrame]) -> None:

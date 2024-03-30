@@ -4,7 +4,6 @@ from tqdm import tqdm
 
 import pandas as pd
 from sentence_transformers.cross_encoder import CrossEncoder
-from sentence_transformers.cross_encoder.evaluation import CERerankingEvaluator
 from sentence_transformers import SentenceTransformer, InputExample, losses
 from sentence_transformers import evaluation
 
@@ -12,18 +11,32 @@ import torch
 from torch.utils.data import DataLoader
 
 from preprocess import Preprocessor
+from evaluator import CustomCERerankingEvaluator
 from constants import DIRECTORY
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class Trainer:
-    def __init__(self, batch_size: int, model_name: str, n_epochs: int):
+    def __init__(
+        self,
+        batch_size: int,
+        model_name: str,
+        n_epochs: int,
+        evaluation_steps: int,
+        warmup_steps: int,
+        learning_rate: float,
+    ):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.batch_size = batch_size
         self.model_name = model_name
         self.n_epochs = n_epochs
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        logging.info(f"Using device: {self.device}")
+        self.evaluation_steps = evaluation_steps
+        self.warmup_steps = warmup_steps
+        self.optimizer_params = {"lr": learning_rate}
+
+        logger.info(f"Using device: {self.device}")
 
     def get_dataloader(self):
         train = pd.read_parquet(f"{DIRECTORY}/train.parquet")
@@ -66,36 +79,33 @@ class Trainer:
                 valid_examples[qid]["positive"].add(row.get("product_title"))
             else:
                 valid_examples[qid]["negative"].add(row.get("product_title"))
-        self.evaluator = CERerankingEvaluator(valid_examples, name="valid")
+        self.evaluator = CustomCERerankingEvaluator(
+            valid_examples, name="cross_encoder", log_dir=f"{DIRECTORY}/logs"
+        )
 
     def compile_model(self):
-        num_labels = 1
-        max_length = 512
 
         self.model = CrossEncoder(
             self.model_name,
-            num_labels=num_labels,
-            max_length=max_length,
+            num_labels=1,
+            max_length=512,
             default_activation_function=torch.nn.Identity(),
             device=self.device,
         )
 
     def fit(self):
         loss = torch.nn.MSELoss()
-        evaluation_steps = 2000
-        warmup_steps = 2000
-        learning_rate = 8e-5
         self.model.fit(
             train_dataloader=self.train_dataloader,
             loss_fct=loss,
             evaluator=self.evaluator,
             epochs=self.n_epochs,
-            evaluation_steps=evaluation_steps,
-            warmup_steps=warmup_steps,
-            output_path=f"{DIRECTORY}_models_tmp/{self.model_name}",
-            optimizer_params={"lr": learning_rate},
+            evaluation_steps=self.evaluation_steps,
+            warmup_steps=self.warmup_steps,
+            output_path=f"{DIRECTORY}/models/temp",
+            optimizer_params=self.optimizer_params,
         )
-        self.model.save(f"{DIRECTORY}_models/{self.model_name}")
+        self.model.save(f"{DIRECTORY}/models")
 
     def train(self):
         self.get_dataloader()
@@ -107,24 +117,32 @@ class Trainer:
 @click.command()
 @click.option("--data_version", type=str, default="small_version", help="Data version.")
 @click.option("--train_fraction", type=float, default=0.8, help="Train fraction.")
-@click.option("--batch_size", type=int, default=64, help="Batch size.")
+@click.option("--batch_size", type=int, default=16, help="Batch size.")
 @click.option(
     "--model_name",
     type=str,
     default="cross-encoder/ms-marco-MiniLM-L-12-v2",
     help="Model name.",
 )
-@click.option("--n_epochs", type=int, default=5, help="Number of epochs.")
+@click.option("--n_epochs", type=int, default=1, help="Number of epochs.")
+@click.option(
+    "--evaluation_steps", type=int, default=2_000, help="Steps for evaluation"
+)
+@click.option("--warmup_steps", type=int, default=1_000, help="Steps for warmup")
+@click.option("--learning_rate", type=int, default=8e-5, help="Learning rate")
 def main(**kwargs):
-    # p = Preprocessor(
-    #     data_version=kwargs.get("data_version"),
-    #     train_fraction=kwargs.get("train_fraction"),
-    # )
-    # p.process()
+    p = Preprocessor(
+        data_version=kwargs.get("data_version"),
+        train_fraction=kwargs.get("train_fraction"),
+    )
+    p.process()
     t = Trainer(
         batch_size=kwargs.get("batch_size"),
         model_name=kwargs.get("model_name"),
         n_epochs=kwargs.get("n_epochs"),
+        evaluation_steps=kwargs.get("evaluation_steps"),
+        warmup_steps=kwargs.get("warmup_steps"),
+        learning_rate=kwargs.get("learning_rate"),
     )
     t.train()
 
