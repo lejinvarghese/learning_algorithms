@@ -1,8 +1,6 @@
-import os
 import click
-from typing import Tuple, Dict
 import logging
-import argparse
+from tqdm import tqdm
 
 import pandas as pd
 from sentence_transformers.cross_encoder import CrossEncoder
@@ -12,94 +10,80 @@ from sentence_transformers import evaluation
 
 import torch
 from torch.utils.data import DataLoader
-from sklearn.model_selection import train_test_split
+
+from preprocess import Preprocessor
+from constants import DIRECTORY
 
 logging.basicConfig(level=logging.INFO)
 
-DIRECTORY = "data/amazon_search"
-SRC_PREFIX = "shopping_queries_dataset"
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logging.info(f"Using device: {device}")
 
 
-class Preprocessor:
-    def __init__(self, directory: str, src_prefix: str):
-        self.directory = directory
-        self.src_prefix = src_prefix
-        self.filters = [("small_version", "==", 1), ("product_locale", "==", "us")]
-        self.cols = [
-            "query_id",
-            "query",
-            "product_id",
-            "product_title",
-            "product_description",
-            "product_bullet_point",
-            "product_brand",
-            "product_color",
-            "gain",
-        ]
-        self.gain_mapper = {
-            "E": 1.0,
-            "S": 0.1,
-            "C": 0.01,
-            "I": 0.0,
-        }
+class Trainer:
+    def __init__(self, batch_size: int):
+        self.batch_size = batch_size
 
-    def load(self):
-        judgments = pd.read_parquet(
-            f"{self.directory}/{self.src_prefix}_examples.parquet", filters=self.filters
-        )
-        products = pd.read_parquet(
-            f"{self.directory}/{self.src_prefix}_products.parquet",
-            filters=self.filters[1:],
-        )
+    def get_dataloader(self):
+        train = pd.read_parquet(f"{DIRECTORY}/train.parquet")
+        train_examples = []
+        for _, row in tqdm(
+            train.iterrows(),
+            total=len(train),
+            desc="Generating training data loader",
+            colour="green",
+        ):
+            train_examples.append(
+                InputExample(
+                    texts=[row.get("query"), row.get("product_title")],
+                    label=float(row.get("gain")),
+                )
+            )
+            train_dataloader = DataLoader(
+                train_examples, shuffle=True, batch_size=self.batch_size, drop_last=True
+            )
+        return train_dataloader
 
-        data = pd.merge(
-            judgments,
-            products,
-            how="left",
-            on="product_id",
-        )
-
-        data["gain"] = data["esci_label"].apply(lambda x: self.gain_mapper.get(x, 0.0))
-        return data
-
-    def split(
-        self, data: pd.DataFrame, train_fraction: float = 0.8, random_state: int = 42
-    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        train = data[data["split"] == "train"][self.cols]
-        test = data[data["split"] == "test"][self.cols]
-
-        queries = train["query_id"].unique()
-        train_size = int(train_fraction * len(queries))
-        queries_train, queries_valid = train_test_split(
-            queries, train_size=train_size, random_state=random_state
-        )
-
-        valid = train[train["query_id"].isin(queries_valid)]
-        train = train[train["query_id"].isin(queries_train)]
-        logging.info(
-            f"Train shape: {train.shape}, Valid shape: {valid.shape}, Test shape: {test.shape}"
-        )
-        logging.info(train.head())
-        return {"train": train, "valid": valid, "test": test}
-
-    def save(self, data: Dict[str, pd.DataFrame]) -> None:
-        for k, v in data.items():
-            v.to_parquet(f"{self.directory}/{k}.parquet")
+    def get_evaluator(self):
+        valid = pd.read_parquet(f"{DIRECTORY}/valid.parquet")
+        valid_examples, query_ids = {}, {}
+        for _, row in tqdm(
+            valid.iterrows(),
+            total=len(valid),
+            desc="Generating evaluator",
+            colour="green",
+        ):
+            qid = query_ids.get(row.get("query"), len(query_ids))
+            if qid == len(query_ids):
+                query_ids[row.get("query")] = qid
+            if qid not in valid_examples:
+                valid_examples[qid] = {
+                    "query": row.get("query"),
+                    "positive": set(),
+                    "negative": set(),
+                }
+            if row.get("gain") > 0:
+                valid_examples[qid]["positive"].add(row.get("product_title"))
+            else:
+                valid_examples[qid]["negative"].add(row.get("product_title"))
+        evaluator = CERerankingEvaluator(valid_examples, name="valid")
+        return evaluator
 
 
 @click.command()
+@click.option("--data_version", type=str, default="small_version", help="Data version.")
 @click.option("--train_fraction", type=float, default=0.8, help="Train fraction.")
-@click.option("--cache", type=bool, default=True, help="Cache datasets.")
-@click.option("--random_state", type=int, default=42, help="Random seed.")
-def main(train_fraction: float, cache: bool, random_state: int):
-    p = Preprocessor(directory=DIRECTORY, src_prefix=SRC_PREFIX)
-    data = p.load()
-    splits = p.split(data, train_fraction=train_fraction, random_state=random_state)
-    if cache:
-        p.save(splits)
+@click.option("--batch_size", type=int, default=32, help="Batch size.")
+def main(**kwargs):
+    p = Preprocessor(
+        data_version=kwargs.get("data_version"),
+        train_fraction=kwargs.get("train_fraction"),
+    )
+    p.run()
+    t = Trainer(batch_size=kwargs.get("batch_size"))
+    logging.info(type(t.get_dataloader()))
+    logging.info(type(t.get_evaluator()))
 
 
 if __name__ == "__main__":
