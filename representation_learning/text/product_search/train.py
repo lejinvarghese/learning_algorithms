@@ -1,9 +1,11 @@
 import click
 import logging
+from datetime import datetime
 from tqdm import tqdm
 
 import pandas as pd
 from sentence_transformers.cross_encoder import CrossEncoder
+from sentence_transformers.cross_encoder.evaluation import CERerankingEvaluator
 from sentence_transformers import SentenceTransformer, InputExample, losses
 from sentence_transformers import evaluation
 
@@ -11,11 +13,12 @@ import torch
 from torch.utils.data import DataLoader
 
 from preprocess import Preprocessor
-from evaluator import CustomCERerankingEvaluator
+from torch.utils.tensorboard import SummaryWriter
 from constants import DIRECTORY
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+now = datetime.now().strftime("%Y%m%d%H%M%S")
 
 
 class Trainer:
@@ -35,6 +38,7 @@ class Trainer:
         self.evaluation_steps = evaluation_steps
         self.warmup_steps = warmup_steps
         self.optimizer_params = {"lr": learning_rate}
+        self.writer = SummaryWriter(log_dir=f"{DIRECTORY}/logs/{now}")
 
         logger.info(f"Using device: {self.device}")
 
@@ -79,9 +83,7 @@ class Trainer:
                 valid_examples[qid]["positive"].add(row.get("product_title"))
             else:
                 valid_examples[qid]["negative"].add(row.get("product_title"))
-        self.evaluator = CustomCERerankingEvaluator(
-            valid_examples, name="cross_encoder", log_dir=f"{DIRECTORY}/logs"
-        )
+        self.evaluator = CERerankingEvaluator(valid_examples, name="cross_encoder")
 
     def compile_model(self):
 
@@ -93,6 +95,9 @@ class Trainer:
             device=self.device,
         )
 
+    def callback(self, score, epoch, steps):
+        self.writer.add_scalar("score", score, (epoch + 1) * steps)
+
     def fit(self):
         loss = torch.nn.MSELoss()
         self.model.fit(
@@ -102,10 +107,11 @@ class Trainer:
             epochs=self.n_epochs,
             evaluation_steps=self.evaluation_steps,
             warmup_steps=self.warmup_steps,
-            output_path=f"{DIRECTORY}/models/temp",
             optimizer_params=self.optimizer_params,
+            output_path=f"{DIRECTORY}/models/temp",
+            callback=self.callback,
         )
-        self.model.save(f"{DIRECTORY}/models")
+        self.model.save(f"{DIRECTORY}/models/{self.model_name}")
 
     def train(self):
         self.get_dataloader()
@@ -125,12 +131,13 @@ class Trainer:
     help="Model name.",
 )
 @click.option("--n_epochs", type=int, default=1, help="Number of epochs.")
-@click.option(
-    "--evaluation_steps", type=int, default=2_000, help="Steps for evaluation"
-)
-@click.option("--warmup_steps", type=int, default=1_000, help="Steps for warmup")
-@click.option("--learning_rate", type=int, default=8e-5, help="Learning rate")
+@click.option("--evaluation_steps", type=int, default=1000, help="Steps for evaluation")
+@click.option("--warmup_steps", type=int, default=1000, help="Steps for warmup")
+@click.option("--learning_rate", type=float, default=7e-6, help="Learning rate")
 def main(**kwargs):
+    click.secho("Parameters: ", fg="bright_green", bold=True)
+    for k, v in kwargs.items():
+        click.secho(f"{k}: {v}", fg="bright_cyan")
     p = Preprocessor(
         data_version=kwargs.get("data_version"),
         train_fraction=kwargs.get("train_fraction"),
