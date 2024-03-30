@@ -35,7 +35,7 @@ class Preprocessor:
             "I": 0.0,
         }
 
-    def run(self) -> None:
+    def process(self) -> None:
         data = self.read()
         splits = self.split(data)
         self.save(splits)
