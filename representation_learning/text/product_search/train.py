@@ -79,9 +79,9 @@ class Trainer:
                     "positive": set(),
                     "negative": set(),
                 }
-            if row.get("gain") > 0:
+            if row.get("gain") > 0.0:
                 valid_examples[qid]["positive"].add(row.get("product_title"))
-            else:
+            elif row.get("gain") == 0.0:
                 valid_examples[qid]["negative"].add(row.get("product_title"))
         self.evaluator = CERerankingEvaluator(valid_examples, name="cross_encoder")
 
@@ -133,16 +133,16 @@ class Trainer:
 @click.option("--n_epochs", type=int, default=1, help="Number of epochs.")
 @click.option("--evaluation_steps", type=int, default=1000, help="Steps for evaluation")
 @click.option("--warmup_steps", type=int, default=1000, help="Steps for warmup")
-@click.option("--learning_rate", type=float, default=7e-6, help="Learning rate")
+@click.option("--learning_rate", type=float, default=8e-6, help="Learning rate")
 def main(**kwargs):
     click.secho("Parameters: ", fg="bright_green", bold=True)
     for k, v in kwargs.items():
         click.secho(f"{k}: {v}", fg="bright_cyan")
-    p = Preprocessor(
-        data_version=kwargs.get("data_version"),
-        train_fraction=kwargs.get("train_fraction"),
-    )
-    p.process()
+    # p = Preprocessor(
+    #     data_version=kwargs.get("data_version"),
+    #     train_fraction=kwargs.get("train_fraction"),
+    # )
+    # p.process()
     t = Trainer(
         batch_size=kwargs.get("batch_size"),
         model_name=kwargs.get("model_name"),
