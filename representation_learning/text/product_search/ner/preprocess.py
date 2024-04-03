@@ -44,7 +44,7 @@ class Preprocessor:
             end_token = query[:end].count(" ")
             return {
                 "tokenized_text": query.split(" "),
-                "ner": [start_token, end_token, self.entity],
+                "ner": [[start_token, end_token, self.entity]],
             }
 
 
