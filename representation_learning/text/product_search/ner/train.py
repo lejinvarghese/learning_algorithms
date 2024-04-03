@@ -29,8 +29,8 @@ from types import SimpleNamespace
 
 # Define the hyperparameters in a config variable
 config = SimpleNamespace(
-    num_steps=2000,  # number of training iteration
-    train_batch_size=4,
+    num_steps=1000,  # number of training iteration
+    train_batch_size=8,
     eval_every=100,  # evaluation/saving steps
     save_directory="logs",  # where to save checkpoints
     warmup_ratio=0.1,  # warmup steps
@@ -42,7 +42,7 @@ config = SimpleNamespace(
     max_types=25,  # maximum number of entity types during training
     shuffle_types=True,  # if shuffle or not entity types
     random_drop=True,  # randomly drop entity types
-    max_neg_type_ratio=2,  # ratio of positive/negative types, 1 mean 50%/50%, 2 mean 33%/66%, 3 mean 25%/75% ...
+    max_neg_type_ratio=4,  # ratio of positive/negative types, 1 mean 50%/50%, 2 mean 33%/66%, 3 mean 25%/75% ...
     max_len=384,  # maximum sentence length
 )
 
@@ -144,7 +144,7 @@ eval_data = {
         # "organization",
         # "person",
     ],
-    "samples": data[:50],
+    "samples": data[:100],
 }
 
 train(model, config, data, eval_data)
