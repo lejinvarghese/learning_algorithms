@@ -13,7 +13,7 @@ queries = [
     "nikon d3500 camera",
     "adidas samba shoes",
     "cate blanchett armani perfume",
-    "purple mattress"
+    "purple mattress",
 ]
 
 labels = [
@@ -26,14 +26,18 @@ labels = [
     "person",
 ]
 
+
 @click.command()
-@click.option("--threshold", type=float, default=0.5, help="Threshold for entity recognition.")
-def main(threshold):   
+@click.option(
+    "--threshold", type=float, default=0.5, help="Threshold for entity recognition."
+)
+def main(threshold):
     for q in queries:
         click.secho(f"\nQuery: {q}", fg="red")
         entities = model.predict_entities(q, labels, threshold=threshold)
         for entity in entities:
             click.secho(f'{entity["text"]} => {entity["label"]}', fg="blue")
+
 
 if __name__ == "__main__":
     main()
