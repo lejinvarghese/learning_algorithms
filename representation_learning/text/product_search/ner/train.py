@@ -23,19 +23,19 @@ valid_path = f"{DIRECTORY}/valid_ner.json"
 with open(valid_path, "r") as f:
     valid = json.load(f)
 
-model = GLiNER.from_pretrained("urchade/gliner_small")
+model = GLiNER.from_pretrained("urchade/gliner_base")
 
 from types import SimpleNamespace
 
 # Define the hyperparameters in a config variable
 config = SimpleNamespace(
-    num_steps=1000,  # number of training iteration
+    num_steps=2000,  # number of training iteration
     train_batch_size=4,
     eval_every=100,  # evaluation/saving steps
     save_directory="logs",  # where to save checkpoints
     warmup_ratio=0.1,  # warmup steps
     device="cuda" if torch.cuda.is_available() else "cpu",
-    lr_encoder=1e-6,  # learning rate for the backbone
+    lr_encoder=1e-5,  # learning rate for the backbone
     lr_others=5e-5,  # learning rate for other parameters
     freeze_token_rep=False,  # freeze of not the backbone
     # Parameters for set_sampling_params
@@ -71,7 +71,7 @@ def train(model, config, train_data, eval_data=None):
         config.lr_encoder, config.lr_others, config.freeze_token_rep
     )
 
-    pbar = tqdm(range(config.num_steps))
+    pbar = tqdm(range(config.num_steps), colour="green")
 
     if config.warmup_ratio < 1:
         num_warmup_steps = int(config.num_steps * config.warmup_ratio)
