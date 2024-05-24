@@ -4,7 +4,7 @@ import logging
 import torch
 import pandas as pd
 from tqdm import tqdm
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, AutoModel
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 from constants import DIRECTORY
 
