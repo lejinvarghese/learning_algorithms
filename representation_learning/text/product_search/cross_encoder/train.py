@@ -11,7 +11,7 @@ from sentence_transformers import  InputExample
 import torch
 from torch.utils.data import DataLoader
 
-from preprocess import Preprocessor
+from cross_encoder.preprocess import Preprocessor
 from torch.utils.tensorboard import SummaryWriter
 from constants import DIRECTORY
 
@@ -19,6 +19,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 now = datetime.now().strftime("%Y%m%d%H%M%S")
 
+def get_document(row):
+    return str({"title": row.get("product_title"), 
+                        "description": row.get("product_description"), 
+                        "brand": row.get("product_brand"), 
+                        "color": row.get("product_color")})
 
 class Trainer:
     def __init__(
@@ -38,10 +43,45 @@ class Trainer:
         self.warmup_steps = warmup_steps
         self.optimizer_params = {"lr": learning_rate}
         self.writer = SummaryWriter(log_dir=f"{DIRECTORY}/logs/{now}")
+        self.train_dataloader = self._get_dataloader()
+        self.evaluator = self._get_evaluator()
+        self.global_step = 0 
 
         logger.info(f"Using device: {self.device}")
+        
+    def train(self):
+        self.compile()
+        self.fit()
+    
+    def compile(self):
+        self.model = CrossEncoder(
+            self.model_name,
+            num_labels=1,
+            max_length=512,
+            default_activation_function=torch.nn.Identity(),
+            device=self.device,
+        )
+    
+    def fit(self):
+        loss = torch.nn.HuberLoss()
+        self.model.fit(
+            train_dataloader=self.train_dataloader,
+            loss_fct=loss,
+            evaluator=self.evaluator,
+            epochs=self.n_epochs,
+            evaluation_steps=self.evaluation_steps,
+            warmup_steps=self.warmup_steps,
+            optimizer_params=self.optimizer_params,
+            output_path=f"{DIRECTORY}/models/temp",
+            callback=self._callback,
+        )
+        self.model.save(f"{DIRECTORY}/models/{self.model_name}")
+    
+    def _callback(self, score, epoch, steps):
+        self.global_step += steps
+        self.writer.add_scalar("score", score, self.global_step)
 
-    def get_dataloader(self):
+    def _get_dataloader(self):
         train = pd.read_parquet(f"{DIRECTORY}/train.parquet")
         train_examples = []
         for _, row in tqdm(
@@ -52,15 +92,15 @@ class Trainer:
         ):
             train_examples.append(
                 InputExample(
-                    texts=[row.get("query"), row.get("product_title")],
+                    texts=[row.get("query"), get_document(row)],
                     label=float(row.get("gain")),
                 )
             )
-        self.train_dataloader = DataLoader(
+        return DataLoader(
             train_examples, shuffle=True, batch_size=self.batch_size, drop_last=True
         )
 
-    def get_evaluator(self):
+    def _get_evaluator(self):
         valid = pd.read_parquet(f"{DIRECTORY}/valid.parquet")
         valid_examples, query_ids = {}, {}
         for _, row in tqdm(
@@ -79,44 +119,10 @@ class Trainer:
                     "negative": set(),
                 }
             if row.get("gain") > 0.0:
-                valid_examples[qid]["positive"].add(row.get("product_title"))
+                valid_examples[qid]["positive"].add(get_document(row))
             elif row.get("gain") == 0.0:
-                valid_examples[qid]["negative"].add(row.get("product_title"))
-        self.evaluator = CERerankingEvaluator(valid_examples, name="cross_encoder")
-
-    def compile_model(self):
-
-        self.model = CrossEncoder(
-            self.model_name,
-            num_labels=1,
-            max_length=512,
-            default_activation_function=torch.nn.Identity(),
-            device=self.device,
-        )
-
-    def callback(self, score, epoch, steps):
-        self.writer.add_scalar("score", score, (epoch + 1) * steps)
-
-    def fit(self):
-        loss = torch.nn.MSELoss()
-        self.model.fit(
-            train_dataloader=self.train_dataloader,
-            loss_fct=loss,
-            evaluator=self.evaluator,
-            epochs=self.n_epochs,
-            evaluation_steps=self.evaluation_steps,
-            warmup_steps=self.warmup_steps,
-            optimizer_params=self.optimizer_params,
-            output_path=f"{DIRECTORY}/models/temp",
-            callback=self.callback,
-        )
-        self.model.save(f"{DIRECTORY}/models/{self.model_name}")
-
-    def train(self):
-        self.get_dataloader()
-        self.get_evaluator()
-        self.compile_model()
-        self.fit()
+                valid_examples[qid]["negative"].add(get_document(row))
+        return CERerankingEvaluator(valid_examples, name="cross_encoder")
 
 
 @click.command()
@@ -129,19 +135,19 @@ class Trainer:
     default="cross-encoder/ms-marco-MiniLM-L-12-v2",
     help="Model name.",
 )
-@click.option("--n_epochs", type=int, default=1, help="Number of epochs.")
-@click.option("--evaluation_steps", type=int, default=1000, help="Steps for evaluation")
+@click.option("--n_epochs", type=int, default=2, help="Number of epochs.")
+@click.option("--evaluation_steps", type=int, default=500, help="Steps for evaluation")
 @click.option("--warmup_steps", type=int, default=1000, help="Steps for warmup")
-@click.option("--learning_rate", type=float, default=8e-6, help="Learning rate")
+@click.option("--learning_rate", type=float, default=1e-5, help="Learning rate")
 def main(**kwargs):
     click.secho("Parameters: ", fg="bright_green", bold=True)
     for k, v in kwargs.items():
         click.secho(f"{k}: {v}", fg="bright_cyan")
-    p = Preprocessor(
-        data_version=kwargs.get("data_version"),
-        train_fraction=kwargs.get("train_fraction"),
-    )
-    p.process()
+    # p = Preprocessor(
+    #     data_version=kwargs.get("data_version"),
+    #     train_fraction=kwargs.get("train_fraction"),
+    # )
+    # p.process()
     t = Trainer(
         batch_size=kwargs.get("batch_size"),
         model_name=kwargs.get("model_name"),
