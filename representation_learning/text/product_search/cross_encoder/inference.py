@@ -22,7 +22,7 @@ cols = [
 ]
 
 
-class Predictor:
+class BatchPredictor:
     def __init__(self, model_path: str):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         logger.info(f"Using device: {self.device}")
@@ -70,7 +70,7 @@ def main(sample):
     products = df["product_title"].to_list()
 
     model_path = f"{DIRECTORY}/models/cross-encoder/ms-marco-MiniLM-L-12-v2"
-    pr = Predictor(model_path)
+    pr = BatchPredictor(model_path)
     df["score"] = pr.predict(queries, products)
     df.sort_values(by=["query_id", "score"], ascending=False, inplace=True)
     logger.info(df[cols[2:] + ["score"]].head(10))
