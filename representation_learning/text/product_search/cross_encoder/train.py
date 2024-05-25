@@ -1,7 +1,6 @@
 import click
 import logging
 from datetime import datetime
-from tqdm import tqdm
 
 import pandas as pd
 from sentence_transformers.cross_encoder import CrossEncoder
@@ -108,11 +107,11 @@ def main(**kwargs):
     click.secho("Parameters: ", fg="bright_green", bold=True)
     for k, v in kwargs.items():
         click.secho(f"{k}: {v}", fg="bright_cyan")
-    # p = Preprocessor(
-    #     data_version=kwargs.get("data_version"),
-    #     train_fraction=kwargs.get("train_fraction"),
-    # )
-    # p.process()
+    p = Preprocessor(
+        data_version=kwargs.get("data_version"),
+        train_fraction=kwargs.get("train_fraction"),
+    )
+    p.process()
     t = Trainer(
         batch_size=kwargs.get("batch_size"),
         model_name=kwargs.get("model_name"),
