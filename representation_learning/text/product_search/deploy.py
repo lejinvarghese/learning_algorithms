@@ -9,7 +9,7 @@ dest_model_name = "esci-ms-marco-MiniLM-L-12-v2"
 model = AutoModelForSequenceClassification.from_pretrained(model_path)
 tokenizer = AutoTokenizer.from_pretrained(model_path)
 
-model.push_to_hub(dest_model_name)
-tokenizer.push_to_hub(dest_model_name)
+model.push_to_hub(dest_model_name, ignore_metadata_errors=True)
+tokenizer.push_to_hub(dest_model_name, ignore_metadata_errors=True)
     
     

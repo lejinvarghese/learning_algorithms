@@ -63,7 +63,7 @@ class Trainer:
         )
     
     def fit(self):
-        loss = torch.nn.HuberLoss()
+        loss = torch.nn.CrossEntropyLoss()
         self.model.fit(
             train_dataloader=self.train_dataloader,
             loss_fct=loss,
@@ -71,6 +71,8 @@ class Trainer:
             epochs=self.n_epochs,
             evaluation_steps=self.evaluation_steps,
             warmup_steps=self.warmup_steps,
+            scheduler="warmupcosinewithhardrestarts",
+            weight_decay=1e-4,
             optimizer_params=self.optimizer_params,
             output_path=f"{DIRECTORY}/models/temp",
             callback=self._callback,
@@ -128,7 +130,7 @@ class Trainer:
 @click.command()
 @click.option("--data_version", type=str, default="small_version", help="Data version.")
 @click.option("--train_fraction", type=float, default=0.8, help="Train fraction.")
-@click.option("--batch_size", type=int, default=16, help="Batch size.")
+@click.option("--batch_size", type=int, default=24, help="Batch size.")
 @click.option(
     "--model_name",
     type=str,
