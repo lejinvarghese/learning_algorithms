@@ -6,7 +6,6 @@ from tqdm import tqdm
 import pandas as pd
 from sentence_transformers.cross_encoder import CrossEncoder
 from sentence_transformers.cross_encoder.evaluation import CERerankingEvaluator
-from sentence_transformers import  InputExample
 
 import torch
 from torch.utils.data import DataLoader
@@ -14,16 +13,11 @@ from torch.utils.data import DataLoader
 from cross_encoder.preprocess import Preprocessor
 from torch.utils.tensorboard import SummaryWriter
 from constants import DIRECTORY
+from utils import get_pairs, get_triplets
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 now = datetime.now().strftime("%Y%m%d%H%M%S")
-
-def get_document(row):
-    return str({"title": row.get("product_title"), 
-                        "description": row.get("product_description"), 
-                        "brand": row.get("product_brand"), 
-                        "color": row.get("product_color")})
 
 class Trainer:
     def __init__(
@@ -85,46 +79,15 @@ class Trainer:
 
     def _get_dataloader(self):
         train = pd.read_parquet(f"{DIRECTORY}/train.parquet")
-        train_examples = []
-        for _, row in tqdm(
-            train.iterrows(),
-            total=len(train),
-            desc="Generating training data loader",
-            colour="green",
-        ):
-            train_examples.append(
-                InputExample(
-                    texts=[row.get("query"), get_document(row)],
-                    label=float(row.get("gain")),
-                )
-            )
+        train_examples = get_pairs(train)
         return DataLoader(
             train_examples, shuffle=True, batch_size=self.batch_size, drop_last=True
         )
 
     def _get_evaluator(self):
         valid = pd.read_parquet(f"{DIRECTORY}/valid.parquet")
-        valid_examples, query_ids = {}, {}
-        for _, row in tqdm(
-            valid.iterrows(),
-            total=len(valid),
-            desc="Generating evaluator",
-            colour="green",
-        ):
-            qid = query_ids.get(row.get("query"), len(query_ids))
-            if qid == len(query_ids):
-                query_ids[row.get("query")] = qid
-            if qid not in valid_examples:
-                valid_examples[qid] = {
-                    "query": row.get("query"),
-                    "positive": set(),
-                    "negative": set(),
-                }
-            if row.get("gain") > 0.0:
-                valid_examples[qid]["positive"].add(get_document(row))
-            elif row.get("gain") == 0.0:
-                valid_examples[qid]["negative"].add(get_document(row))
-        return CERerankingEvaluator(valid_examples, name="cross_encoder")
+        valid_triplets = get_triplets(valid, split="validation")
+        return CERerankingEvaluator(valid_triplets, name="cross_encoder")
 
 
 @click.command()
