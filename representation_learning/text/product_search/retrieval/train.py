@@ -4,6 +4,7 @@ from sentence_transformers import SentenceTransformer, SentenceTransformerTraine
 from sentence_transformers.losses import (
     MultipleNegativesRankingLoss,
     CachedGISTEmbedLoss,
+    TripletLoss,
 )
 from sentence_transformers.training_args import SentenceTransformerTrainingArguments
 from sentence_transformers.training_args import BatchSamplers
@@ -11,97 +12,112 @@ from sentence_transformers.evaluation import TripletEvaluator
 from multiprocessing import cpu_count
 from transformers.integrations import TensorBoardCallback
 
-esci = load_dataset(
-    "smangrul/amazon_esci", num_proc=cpu_count() - 2, ignore_verifications=True
-)
+RANDOM_STATE = 42
+DATASET_NAME = "tasksource/esci"
+N_PROCS = cpu_count() - 2
+cols = [
+    "product_title",
+    "product_description",
+    "product_brand",
+    "product_color",
+    "esci_label",
+    "query",
+]
+esci = load_dataset(DATASET_NAME, num_proc=N_PROCS, columns=cols)
 esci_train_df = esci["train"].to_pandas()
-esci_valid_df = esci["validation"].to_pandas()
+esci_valid_df = esci["test"].to_pandas()
+print(esci_train_df.shape, esci_valid_df.shape)
 
-guide = SentenceTransformer("all-MiniLM-L6-v2", trust_remote_code=True)
+
+prompts = {"query": "search_query: ", "document": "search_document:"}
 
 
-def build_multi_neg_dataset(df, query_prompt="", doc_prompt=""):
-    df = df[df["esci_label"].isin(["E", "I"])]
-    df["label"] = np.where(df["esci_label"].isin(["E"]), 1, 0)
-    pos = df[df["label"] == 1]
-    pos_nec = pos[["query", "product_title"]]
-    pos_nec["query"] = pos_nec["query"].apply(lambda x: f"{query_prompt}{x}")
-    pos_nec["product_title"] = pos_nec["product_title"].apply(
-        lambda x: f"{doc_prompt}{x}"
+def build_triplets(df, prompts, sample_frac=0.1):
+    # df = df[df["esci_label"].isin(["E", "I"])]
+    df["label"] = np.where(df["esci_label"].isin(["Exact"]), 1, 0)
+    df["document"] = (
+        df["product_title"]
+        # + ", description: "
+        # + df["product_description"]
+        + ", "
+        + df["product_brand"]
+        + ", "
+        + df["product_color"]
     )
-    pos_nec.columns = ["query", "pos"]
+    pos = df[df["label"] == 1]
+    pos_nec = pos[["query", "document"]]
+    pos_nec.loc[:, "query"] = pos_nec["query"].apply(
+        lambda x: f"{prompts.get('query', '')}{x}"
+    )
+    pos_nec.loc[:, "document"] = pos_nec["document"].apply(
+        lambda x: f"{prompts.get('document', '')}{x}"
+    )
+    pos_nec.columns = ["anchor", "positive"]
 
     neg = df[df["label"] == 0]
-    neg_nec = neg[["query", "product_title"]]
-    neg_nec["query"] = neg_nec["query"].apply(lambda x: f"{query_prompt}{x}")
-    neg_nec["product_title"] = neg_nec["product_title"].apply(
-        lambda x: f"{doc_prompt}{x}"
+    neg_nec = neg[["query", "document"]]
+    neg_nec.loc[:, "query"] = neg_nec["query"].apply(
+        lambda x: f"{prompts.get('query', '')}{x}"
     )
-    neg_nec.columns = ["query", "neg"]
+    neg_nec.loc[:, "document"] = neg_nec["document"].apply(
+        lambda x: f"{prompts.get('document', '')}{x}"
+    )
+    neg_nec.columns = ["anchor", "negative"]
 
-    posneg = pos_nec.merge(neg_nec, on="query", how="inner").sample(
-        frac=0.5, random_state=42
+    triplets = pos_nec.merge(neg_nec, on="anchor", how="inner").sample(
+        frac=sample_frac, random_state=RANDOM_STATE
+    )
+    return Dataset.from_pandas(triplets, preserve_index=False)
+
+
+def main():
+    training_dataset = build_triplets(esci_train_df, prompts=prompts, sample_frac=0.25)
+    print(f"Finished sampling triplets:{training_dataset.shape}")
+
+    # 1. Load a model to finetune
+    model = SentenceTransformer(
+        "nomic-ai/nomic-embed-text-v1.5", trust_remote_code=True
     )
 
-    return Dataset.from_pandas(posneg, preserve_index=False)
+    # 3. Define a loss function
+    guide = SentenceTransformer("all-MiniLM-L6-v2", trust_remote_code=True)
+    loss = CachedGISTEmbedLoss(model, guide=guide, mini_batch_size=4)
+    # loss = TripletLoss(model)
+
+    args = SentenceTransformerTrainingArguments(
+        output_dir="models/nomic-embed-text-esci",
+        seed=RANDOM_STATE,
+        num_train_epochs=3,
+        per_device_train_batch_size=8,
+        per_device_eval_batch_size=2,
+        gradient_accumulation_steps=2,
+        warmup_ratio=0.1,
+        learning_rate=1e-5,
+        lr_scheduler_type="cosine_with_restarts",
+        fp16=True,
+        bf16=False,
+        batch_sampler=BatchSamplers.NO_DUPLICATES,
+        # eval_steps=100,
+        save_strategy="steps",
+        save_steps=1000,
+        save_total_limit=10,
+        logging_steps=100,
+        run_name="nomic-embed-text-esci",
+        disable_tqdm=False,
+    )
+
+    # 4. Create a trainer & train
+    trainer = SentenceTransformerTrainer(
+        model=model,
+        args=args,
+        train_dataset=training_dataset,
+        loss=loss,
+        callbacks=[TensorBoardCallback()],
+        # eval_dataset=validation_dataset,
+        # evaluator=dev_evaluator,
+    )
+    trainer.train()
 
 
-training_dataset, validation_dataset = build_multi_neg_dataset(
-    esci_train_df, query_prompt="search_query: ", doc_prompt="search_document: "
-), build_multi_neg_dataset(
-    esci_valid_df, query_prompt="search_query: ", doc_prompt="search_document: "
-)
-print("finished building datasets")
-
-# 1. Load a model to finetune
-model = SentenceTransformer("nomic-ai/nomic-embed-text-v1.5", trust_remote_code=True)
-
-# 3. Define a loss function
-loss = CachedGISTEmbedLoss(model, guide=guide, mini_batch_size=4)
-
-args = SentenceTransformerTrainingArguments(
-    # Required parameter:
-    output_dir="models/nomic-embed-text-esci",
-    # Optional training parameters:
-    num_train_epochs=5,
-    per_device_train_batch_size=32,
-    per_device_eval_batch_size=8,
-    warmup_ratio=0.1,
-    fp16=False,  # Set to False if GPU can't handle FP16
-    bf16=False,  # Set to True if GPU supports BF16
-    batch_sampler=BatchSamplers.NO_DUPLICATES,  # MultipleNegativesRankingLoss benefits from no duplicates
-    # Optional tracking/debugging parameters:
-    eval_steps=100,
-    save_strategy="steps",
-    save_steps=100,
-    save_total_limit=5,
-    logging_steps=100,
-    run_name="nomic-embed-text-esci",  # Used in W&B if `wandb` is installed
-)
-
-dev_evaluator = TripletEvaluator(
-    anchors=validation_dataset["query"],
-    positives=validation_dataset["pos"],
-    negatives=validation_dataset["neg"],
-    name="esci-dev",
-)
-dev_evaluator(model)
-# 4. Create a trainer & train
-trainer = SentenceTransformerTrainer(
-    model=model,
-    args=args,
-    train_dataset=training_dataset,
-    eval_dataset=validation_dataset,
-    loss=loss,
-    callbacks=[TensorBoardCallback()],
-    evaluator=dev_evaluator,
-)
-trainer.train()
-
-# test_evaluator = TripletEvaluator(
-#     anchors=test_dataset["anchor"],
-#     positives=test_dataset["positive"],
-#     negatives=test_dataset["negative"],
-#     name="all-nli-test",
-# )
-# test_evaluator(model)
+if __name__ == "__main__":
+    main()
