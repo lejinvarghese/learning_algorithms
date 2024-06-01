@@ -3,8 +3,16 @@ import click
 import numpy as np
 from datasets import load_dataset, Dataset
 from sentence_transformers import SentenceTransformer, SentenceTransformerTrainer
-from sentence_transformers.losses import SoftmaxLoss, CachedMultipleNegativesRankingLoss, TripletLoss, CoSENTLoss
-from sentence_transformers.training_args import BatchSamplers, SentenceTransformerTrainingArguments
+from sentence_transformers.losses import (
+    CachedGISTEmbedLoss,
+    CachedMultipleNegativesRankingLoss,
+    TripletLoss,
+    CoSENTLoss,
+)
+from sentence_transformers.training_args import (
+    BatchSamplers,
+    SentenceTransformerTrainingArguments,
+)
 from sentence_transformers.evaluation import (
     TripletEvaluator,
     SequentialEvaluator,
@@ -18,7 +26,7 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
-os.environ["LOCAL_RANK"] = "0"
+# os.environ["LOCAL_RANK"] = "0"
 
 RANDOM_STATE = 42
 DATASET_NAME = "tasksource/esci"
@@ -31,7 +39,7 @@ cols = [
     "esci_label",
     "query",
 ]
-esci = load_dataset(DATASET_NAME, num_proc=N_PROCS, columns=cols)
+esci = load_dataset("tasksource/esci", num_proc=N_PROCS, columns=cols)
 esci_train_df = esci["train"].to_pandas()
 esci_valid_df = esci["test"].to_pandas()
 click.secho(f"Initial dataset sizes: {esci_train_df.shape, esci_valid_df.shape}", fg="green")
@@ -74,13 +82,15 @@ def build_dataset(df, prompts, n_samples=0.1, dataset_type="triplets"):
     neg_nec.loc[:, "document"] = neg_nec["document"].apply(lambda x: f"{prompts.get('document', '')}{x}")
     neg_nec.columns = ["anchor", "negative"]
 
-    triplets = pos_nec.merge(neg_nec, on="anchor", how="inner").sample(n_samples, random_state=RANDOM_STATE)
+    triplets = pos_nec.merge(neg_nec, on="anchor", how="inner").sample(n_samples, random_state=RANDOM_STATE)[
+        ["anchor", "positive", "negative"]
+    ]
     click.secho(triplets.head())
     if dataset_type == "pairs":
         click.secho(pairs.head())
         pairs = pairs.sample(n_samples, random_state=RANDOM_STATE)
         pairs.columns = ["sentence1", "sentence2", "score"]
-        return Dataset.from_pandas(pairs)
+        return Dataset.from_pandas(pairs, preserve_index=False)
     else:
         return Dataset.from_pandas(triplets, preserve_index=False)
 
@@ -90,29 +100,34 @@ def build_dataset(df, prompts, n_samples=0.1, dataset_type="triplets"):
 def main(n_samples):
     train_triplets_dataset, valid_triplets_dataset = (
         build_dataset(esci_train_df, prompts=prompts, n_samples=n_samples),
-        build_dataset(esci_valid_df, prompts=prompts, n_samples=n_samples // 10),
+        build_dataset(esci_valid_df, prompts=prompts, n_samples=n_samples // 100),
     )
     click.secho(
-        f"Finished sampling triplets:{train_triplets_dataset.shape}, {valid_triplets_dataset.shape}", fg="yellow"
+        f"Finished sampling triplets:{train_triplets_dataset.shape}, {valid_triplets_dataset.shape}",
+        fg="yellow",
     )
 
     train_pairs_dataset, valid_pairs_dataset = (
         build_dataset(esci_train_df, prompts=prompts, n_samples=n_samples, dataset_type="pairs"),
-        build_dataset(esci_valid_df, prompts=prompts, n_samples=n_samples // 10, dataset_type="pairs"),
+        build_dataset(
+            esci_valid_df,
+            prompts=prompts,
+            n_samples=n_samples // 100,
+            dataset_type="pairs",
+        ),
     )
-    click.secho(f"Finished sampling pairs:{train_pairs_dataset.shape}, {valid_pairs_dataset.shape}", fg="yellow")
+    click.secho(
+        f"Finished sampling pairs:{train_pairs_dataset.shape}, {valid_pairs_dataset.shape}",
+        fg="yellow",
+    )
 
-    # 1. Load a model to finetune
-
-    # 3. Define a loss function
-    # guide = SentenceTransformer("all-MiniLM-L6-v2", trust_remote_code=True)
-    # loss = CachedGISTEmbedLoss(model, guide=guide, mini_batch_size=4)
+    guide = SentenceTransformer("cross-encoder/ms-marco-MiniLM-L-6-v2", trust_remote_code=True)
+    loss = CachedGISTEmbedLoss(model, guide=guide, mini_batch_size=4)
     # loss = TripletLoss(model)
-    triplets_loss = CachedMultipleNegativesRankingLoss(model)
     # pairs_loss = CoSENTLoss(model)
     train_dataset = {"triplets": train_triplets_dataset}  # , "pairs": train_pairs_dataset}
     valid_dataset = {"triplets": valid_triplets_dataset}  # , "pairs": valid_pairs_dataset}
-    losses = {"triplets": triplets_loss}  # , "pairs": pairs_loss}
+    # losses = {"triplets": triplets_loss}  # , "pairs": pairs_loss}
 
     triplets_evaluator = TripletEvaluator(
         anchors=valid_triplets_dataset["anchor"],
@@ -135,10 +150,12 @@ def main(n_samples):
         run_name="nomic-embed-text-esci",
         seed=RANDOM_STATE,
         num_train_epochs=3,
-        auto_find_batch_size=True,
-        gradient_accumulation_steps=1,
+        per_device_train_batch_size=4,
+        per_device_eval_batch_size=4,
+        # auto_find_batch_size=True,
+        gradient_accumulation_steps=2,
         warmup_ratio=0.1,
-        learning_rate=1e-4,
+        learning_rate=1e-5,  # learning_rate=1e-6,
         lr_scheduler_type="cosine_with_restarts",
         fp16=False,
         bf16=False,
@@ -147,8 +164,8 @@ def main(n_samples):
         save_steps=5000,
         save_total_limit=10,
         logging_steps=200,
-        eval_steps=2000,
-        dataloader_num_workers=2,
+        eval_steps=1000,
+        dataloader_num_workers=4,
         disable_tqdm=False,
         evaluation_strategy="steps",
         dataloader_drop_last=True,
@@ -158,10 +175,10 @@ def main(n_samples):
     trainer = SentenceTransformerTrainer(
         model=model,
         args=args,
-        train_dataset=train_dataset,
-        loss=losses,
+        train_dataset=train_triplets_dataset,
+        loss=loss,
         callbacks=[TensorBoardCallback()],
-        eval_dataset=valid_dataset,
+        eval_dataset=valid_triplets_dataset,
         evaluator=seq_evaluator,
     )
     trainer.train()

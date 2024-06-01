@@ -1,5 +1,9 @@
 from datasets import load_dataset, Dataset
-from sentence_transformers.evaluation import EmbeddingSimilarityEvaluator, SimilarityFunction, TripletEvaluator
+from sentence_transformers.evaluation import (
+    EmbeddingSimilarityEvaluator,
+    SimilarityFunction,
+    TripletEvaluator,
+)
 from sentence_transformers import SentenceTransformer
 from train import build_dataset
 from multiprocessing import cpu_count
