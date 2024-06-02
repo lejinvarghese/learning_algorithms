@@ -7,7 +7,7 @@ from sentence_transformers.losses import (
     CachedGISTEmbedLoss,
     CachedMultipleNegativesRankingLoss,
     TripletLoss,
-    CoSENTLoss,
+    AnglELoss,
 )
 from sentence_transformers.training_args import (
     BatchSamplers,
@@ -21,7 +21,7 @@ from sentence_transformers.evaluation import (
 )
 from multiprocessing import cpu_count
 from transformers.integrations import TensorBoardCallback
-
+from transformers import EarlyStoppingCallback
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -31,11 +31,13 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 RANDOM_STATE = 42
 DATASET_NAME = "tasksource/esci"
 N_PROCS = cpu_count() - 2
+
 cols = [
     "product_title",
     "product_description",
     "product_brand",
     "product_color",
+    "product_locale",
     "esci_label",
     "query",
 ]
@@ -48,9 +50,8 @@ model = SentenceTransformer("nomic-ai/nomic-embed-text-v1.5", trust_remote_code=
 prompts = {"query": "search_query: ", "document": "search_document: "}
 
 
-def build_dataset(df, prompts, n_samples=0.1, dataset_type="triplets"):
-    # df = df[df["esci_label"].isin(["E", "I"])]
-    df = df.dropna()
+def build_dataset(df, prompts, n_samples, dataset_type="triplets"):
+    df = df[(df.product_locale == "us")].dropna()
 
     conditions = [
         df["esci_label"].isin(["Exact"]),
@@ -58,33 +59,26 @@ def build_dataset(df, prompts, n_samples=0.1, dataset_type="triplets"):
         df["esci_label"].isin(["Complement"]),
     ]
     grades = [1.0, 0.2, 0.01]
-    df["grade"] = np.select(conditions, grades, default=0)
+    df["grade"] = np.select(conditions, grades, default=0.0)
 
-    df["document"] = (
-        df["product_title"]
-        # + ",  "
-        # + df["product_description"]
-        + ", "
-        + df["product_brand"]
-        + ", "
-        + df["product_color"]
-    )
+    df["document"] = df["product_title"] + ", " + df["product_brand"] + ", " + df["product_color"]
     pairs = df[["query", "document", "grade"]].copy()
-    pos = df[df["grade"] == 1]
+
+    pos = df[df["grade"] > 0]
     pos_nec = pos[["query", "document"]]
     pos_nec.loc[:, "query"] = pos_nec["query"].apply(lambda x: f"{prompts.get('query', '')}{x}")
     pos_nec.loc[:, "document"] = pos_nec["document"].apply(lambda x: f"{prompts.get('document', '')}{x}")
     pos_nec.columns = ["anchor", "positive"]
 
-    neg = df[df["grade"] < 1]
+    neg = df[df["grade"] == 0]
     neg_nec = neg[["query", "document"]]
     neg_nec.loc[:, "query"] = neg_nec["query"].apply(lambda x: f"{prompts.get('query', '')}{x}")
     neg_nec.loc[:, "document"] = neg_nec["document"].apply(lambda x: f"{prompts.get('document', '')}{x}")
     neg_nec.columns = ["anchor", "negative"]
 
-    triplets = pos_nec.merge(neg_nec, on="anchor", how="inner").sample(n_samples, random_state=RANDOM_STATE)[
-        ["anchor", "positive", "negative"]
-    ]
+    triplets = pos_nec.merge(neg_nec, on="anchor", how="inner")
+    n_samples = min(n_samples, triplets.shape[0])
+    triplets = triplets.sample(n_samples, random_state=RANDOM_STATE)[["anchor", "positive", "negative"]]
     click.secho(triplets.head())
     if dataset_type == "pairs":
         click.secho(pairs.head())
@@ -121,39 +115,38 @@ def main(n_samples):
         fg="yellow",
     )
 
-    guide = SentenceTransformer("cross-encoder/ms-marco-MiniLM-L-6-v2", trust_remote_code=True)
-    loss = CachedGISTEmbedLoss(model, guide=guide, mini_batch_size=4)
-    # loss = TripletLoss(model)
+    # guide = SentenceTransformer("cross-encoder/ms-marco-MiniLM-L-6-v2", trust_remote_code=True)
+    # loss = CachedGISTEmbedLoss(model, guide=guide, mini_batch_size=4)
+    # loss = CachedMultipleNegativesRankingLoss(model)
+
     # pairs_loss = CoSENTLoss(model)
-    train_dataset = {"triplets": train_triplets_dataset}  # , "pairs": train_pairs_dataset}
-    valid_dataset = {"triplets": valid_triplets_dataset}  # , "pairs": valid_pairs_dataset}
-    # losses = {"triplets": triplets_loss}  # , "pairs": pairs_loss}
+    train_dataset = {"triplets": train_triplets_dataset, "pairs": train_pairs_dataset}
+    valid_dataset = {"triplets": valid_triplets_dataset, "pairs": valid_pairs_dataset}
+    losses = {"triplets": CachedMultipleNegativesRankingLoss(model), "pairs": AnglELoss(model)}
 
     triplets_evaluator = TripletEvaluator(
         anchors=valid_triplets_dataset["anchor"],
         positives=valid_triplets_dataset["positive"],
         negatives=valid_triplets_dataset["negative"],
         main_distance_function=SimilarityFunction.COSINE,
-        name="triplet-esci",
     )
     pairs_evaluator = EmbeddingSimilarityEvaluator(
         sentences1=valid_pairs_dataset["sentence1"],
         sentences2=valid_pairs_dataset["sentence2"],
         scores=valid_pairs_dataset["score"],
         main_similarity=SimilarityFunction.COSINE,
-        name="pairs-esci",
     )
-    seq_evaluator = SequentialEvaluator([triplets_evaluator])  # , pairs_evaluator])
+    seq_evaluator = SequentialEvaluator([triplets_evaluator, pairs_evaluator])
 
     args = SentenceTransformerTrainingArguments(
         output_dir="models/nomic-embed-text-esci",
         run_name="nomic-embed-text-esci",
         seed=RANDOM_STATE,
-        num_train_epochs=3,
+        num_train_epochs=5,
         per_device_train_batch_size=4,
         per_device_eval_batch_size=4,
         # auto_find_batch_size=True,
-        gradient_accumulation_steps=2,
+        gradient_accumulation_steps=4,
         warmup_ratio=0.1,
         learning_rate=1e-5,  # learning_rate=1e-6,
         lr_scheduler_type="cosine_with_restarts",
@@ -163,23 +156,30 @@ def main(n_samples):
         save_strategy="steps",
         save_steps=5000,
         save_total_limit=10,
-        logging_steps=200,
+        logging_steps=100,
         eval_steps=1000,
         dataloader_num_workers=4,
+        dataloader_prefetch_factor=2,
         disable_tqdm=False,
         evaluation_strategy="steps",
         dataloader_drop_last=True,
+        load_best_model_at_end=True,
+        metric_for_best_model="cosine_accuracy",
     )
 
     # 4. Create a trainer & train
     trainer = SentenceTransformerTrainer(
         model=model,
-        args=args,
-        train_dataset=train_triplets_dataset,
-        loss=loss,
-        callbacks=[TensorBoardCallback()],
-        eval_dataset=valid_triplets_dataset,
+        train_dataset=train_dataset,
+        eval_dataset=valid_dataset,
         evaluator=seq_evaluator,
+        loss=losses,
+        callbacks=[
+            TensorBoardCallback(),
+            # EarlyStoppingCallback(early_stopping_patience=5, early_stopping_threshold=0.001),
+        ],
+        compute_metrics=seq_evaluator,
+        args=args,
     )
     trainer.train()
     seq_evaluator(model)
