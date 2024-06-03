@@ -1,68 +1,49 @@
-from datasets import load_dataset, Dataset
-from sentence_transformers.evaluation import (
-    EmbeddingSimilarityEvaluator,
-    SimilarityFunction,
-    TripletEvaluator,
-)
+import click
+import pandas as pd
 from sentence_transformers import SentenceTransformer
-from train import build_dataset
-from multiprocessing import cpu_count
 
-RANDOM_STATE = 42
-DATASET_NAME = "tasksource/esci"
-N_PROCS = cpu_count() - 2
-cols = [
-    "product_title",
-    "product_description",
-    "product_brand",
-    "product_color",
-    "esci_label",
-    "query",
-]
-esci = load_dataset(DATASET_NAME, num_proc=N_PROCS, columns=cols, split="test")
-esci_valid_df = esci.to_pandas()
-print(esci_valid_df.shape)
-
-prompts = {"query": "search_query: ", "document": "search_document:"}
+prompts = {"query": "search_query: ", "document": "search_document: "}
 
 
 def main():
-    eval_dataset = build_triplets(esci_valid_df, prompts=prompts, sample_frac=0.01)
-    print(f"Finished sampling triplets:{eval_dataset.shape}")
 
     models = [
-        "models/nomic-embed-text-esci/checkpoint-5300",
-        "models/nomic-embed-text-esci/checkpoint-7000",
-        "models/nomic-embed-text-esci/checkpoint-11000",
         "nomic-ai/nomic-embed-text-v1.5",
+        "lv12/esci-nomic-embed-text-v1_5_1",
+        "lv12/esci-nomic-embed-text-v1_5",
+        "models/nomic-embed-text-esci/checkpoint-45000",
+    ]
+    sentences = [
+        "search_query: shoes",
+        "search_query: nike",
+        "search_query: adidas",
+        "search_query: nike shoes",
+        "search_query: adidas shoes",
+        "search_document: Nike Air Max Dn, Nike, White",
+        "search_document: Nike Sportswear Tech Fleece Windrunner, Nike, Black",
+        "search_document: Gazelle Indoor Shoes, Adidas, Green",
+        "search_document: Adicolor Crew Sweatshirt Set, Adidas, Green",
     ]
     results = {}
     for m in models:
-        model = SentenceTransformer(m, trust_remote_code=True)
-        # Initialize the evaluator
-        # dev_evaluator = EmbeddingSimilarityEvaluator(
-        #     sentences1=eval_dataset["anchor"],
-        #     sentences2=eval_dataset["positive"],
-        #     scores=eval_dataset["score"],
-        #     main_similarity=SimilarityFunction.COSINE,
-        #     name="sts-dev",
-        # )
-        dev_evaluator = TripletEvaluator(
-            anchors=eval_dataset["anchor"],
-            positives=eval_dataset["positive"],
-            negatives=eval_dataset["negative"],
-            main_distance_function=SimilarityFunction.COSINE,
-            name="all-nli-dev",
+        model = SentenceTransformer(
+            m,
+            trust_remote_code=True,
+            device="cpu",
         )
-        # Run evaluation manually:
-        results[m] = dev_evaluator(model)
-    print(results)
+        embeddings = model.encode(sentences)
+        results[m] = model.similarity(embeddings, embeddings)
+        click.secho(f"Model: {m}", fg="green")
+        click.secho(results[m], fg="yellow")
+    df = pd.concat({m: pd.DataFrame(results[m].tolist(), columns=sentences, index=sentences) for m in results}, axis=1)
+    df = df.reset_index().melt(id_vars="index", var_name=["model", "sentence2"], value_name="similarity")
 
-    """
-    'models/nomic-embed-text-esci/checkpoint-11000': {'all-nli-dev_cosine_accuracy': 0.48403282897039945, 'all-nli-dev_dot_accuracy': 0.2857365125053483, 'all-nli-dev_manhattan_accuracy': 0.47391963903691314, 'all-nli-dev_euclidean_accuracy': 0.4743475047648683, 'all-nli-dev_max_accuracy': 0.48403282897039945
-    }, 'nomic-ai/nomic-embed-text-v1.5': {'all-nli-dev_cosine_accuracy': 0.454004434244817, 'all-nli-dev_dot_accuracy': 0.2972499902757789, 'all-nli-dev_manhattan_accuracy': 0.4517873118363219, 'all-nli-dev_euclidean_accuracy': 0.4529153214827492, 'all-nli-dev_max_accuracy': 0.454004434244817
-    }
-    """
+    df.rename(columns={"index": "sentence1"}, inplace=True)
+    df.sort_values(by=["model", "similarity"], ascending=False, inplace=True)
+    df = df[df["sentence1"] != df["sentence2"]]
+    df["similarity"] = round(df["similarity"], 2)
+    click.secho(df, fg="magenta")
+    df[["model", "sentence1", "sentence2", "similarity"]].to_csv("models/nomic-embed-text-esci/examples.csv", index=False)
 
 
 if __name__ == "__main__":
