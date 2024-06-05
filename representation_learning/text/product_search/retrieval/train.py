@@ -58,19 +58,19 @@ def build_dataset(df, prompts, n_samples, dataset_type="triplets"):
         df["esci_label"].isin(["Substitute"]),
         df["esci_label"].isin(["Complement"]),
     ]
-    grades = [1.0, 0.2, 0.01]
+    grades = [1.0, 0.4, 0.2]
     df["grade"] = np.select(conditions, grades, default=0.0)
 
     df["document"] = df["product_title"] + ", " + df["product_brand"] + ", " + df["product_color"]
     pairs = df[["query", "document", "grade"]].copy()
 
-    pos = df[df["grade"] > 0]
+    pos = df[df["grade"] == 1]
     pos_nec = pos[["query", "document"]]
     pos_nec.loc[:, "query"] = pos_nec["query"].apply(lambda x: f"{prompts.get('query', '')}{x}")
     pos_nec.loc[:, "document"] = pos_nec["document"].apply(lambda x: f"{prompts.get('document', '')}{x}")
     pos_nec.columns = ["anchor", "positive"]
 
-    neg = df[df["grade"] == 0]
+    neg = df[df["grade"] < 1]
     neg_nec = neg[["query", "document"]]
     neg_nec.loc[:, "query"] = neg_nec["query"].apply(lambda x: f"{prompts.get('query', '')}{x}")
     neg_nec.loc[:, "document"] = neg_nec["document"].apply(lambda x: f"{prompts.get('document', '')}{x}")
@@ -82,6 +82,7 @@ def build_dataset(df, prompts, n_samples, dataset_type="triplets"):
     click.secho(triplets.head())
     if dataset_type == "pairs":
         click.secho(pairs.head())
+        n_samples = min(n_samples, pairs.shape[0])
         pairs = pairs.sample(n_samples, random_state=RANDOM_STATE)
         pairs.columns = ["sentence1", "sentence2", "score"]
         return Dataset.from_pandas(pairs, preserve_index=False)
@@ -147,8 +148,8 @@ def main(n_samples):
         per_device_eval_batch_size=4,
         # auto_find_batch_size=True,
         gradient_accumulation_steps=4,
-        warmup_ratio=0.1,
-        learning_rate=1e-5,  # learning_rate=1e-6,
+        warmup_ratio=0.01,
+        learning_rate=1e-6,
         lr_scheduler_type="cosine_with_restarts",
         fp16=False,
         bf16=False,
@@ -165,6 +166,7 @@ def main(n_samples):
         dataloader_drop_last=True,
         load_best_model_at_end=True,
         metric_for_best_model="cosine_accuracy",
+        lr_scheduler_kwargs={"num_cycles": 4},
     )
 
     # 4. Create a trainer & train

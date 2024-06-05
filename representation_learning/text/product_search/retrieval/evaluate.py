@@ -11,7 +11,7 @@ def main():
         "nomic-ai/nomic-embed-text-v1.5",
         "lv12/esci-nomic-embed-text-v1_5_1",
         "lv12/esci-nomic-embed-text-v1_5",
-        "models/nomic-embed-text-esci/checkpoint-45000",
+        "models/nomic-embed-text-esci/checkpoint-50000",
     ]
     sentences = [
         "search_query: shoes",
@@ -43,7 +43,9 @@ def main():
     df = df[df["sentence1"] != df["sentence2"]]
     df["similarity"] = round(df["similarity"], 2)
     click.secho(df, fg="magenta")
-    df[["model", "sentence1", "sentence2", "similarity"]].to_csv("models/nomic-embed-text-esci/examples.csv", index=False)
+    df[["model", "sentence1", "sentence2", "similarity"]].to_csv(
+        "models/nomic-embed-text-esci/examples.csv", index=False
+    )
 
 
 if __name__ == "__main__":
