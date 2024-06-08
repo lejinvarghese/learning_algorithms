@@ -1,13 +1,15 @@
 import os
+import logging
 import click
-import numpy as np
-from datasets import load_dataset, Dataset
 from sentence_transformers import SentenceTransformer, SentenceTransformerTrainer
 from sentence_transformers.losses import (
     CachedGISTEmbedLoss,
+    MultipleNegativesRankingLoss,
     CachedMultipleNegativesRankingLoss,
     TripletLoss,
+    TripletDistanceMetric,
     AnglELoss,
+    MatryoshkaLoss,
 )
 from sentence_transformers.training_args import (
     BatchSamplers,
@@ -19,101 +21,29 @@ from sentence_transformers.evaluation import (
     EmbeddingSimilarityEvaluator,
     SimilarityFunction,
 )
-from multiprocessing import cpu_count
-from transformers.integrations import TensorBoardCallback
 from transformers import EarlyStoppingCallback
-import logging
 
+from data import DataLoader
+
+MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
 logging.basicConfig(level=logging.INFO)
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
-# os.environ["LOCAL_RANK"] = "0"
-
-RANDOM_STATE = 42
-DATASET_NAME = "tasksource/esci"
-N_PROCS = cpu_count() - 2
-
-cols = [
-    "product_title",
-    "product_description",
-    "product_brand",
-    "product_color",
-    "product_locale",
-    "esci_label",
-    "query",
-]
-esci = load_dataset("tasksource/esci", num_proc=N_PROCS, columns=cols)
-esci_train_df = esci["train"].to_pandas()
-esci_valid_df = esci["test"].to_pandas()
-click.secho(f"Initial dataset sizes: {esci_train_df.shape, esci_valid_df.shape}", fg="green")
-
-model = SentenceTransformer("nomic-ai/nomic-embed-text-v1.5", trust_remote_code=True)
-prompts = {"query": "search_query: ", "document": "search_document: "}
-
-
-def build_dataset(df, prompts, n_samples, dataset_type="triplets"):
-    df = df[(df.product_locale == "us")].dropna()
-
-    conditions = [
-        df["esci_label"].isin(["Exact"]),
-        df["esci_label"].isin(["Substitute"]),
-        df["esci_label"].isin(["Complement"]),
-    ]
-    grades = [1.0, 0.4, 0.2]
-    df["grade"] = np.select(conditions, grades, default=0.0)
-
-    df["document"] = df["product_title"] + ", " + df["product_brand"] + ", " + df["product_color"]
-    pairs = df[["query", "document", "grade"]].copy()
-
-    pos = df[df["grade"] == 1]
-    pos_nec = pos[["query", "document"]]
-    pos_nec.loc[:, "query"] = pos_nec["query"].apply(lambda x: f"{prompts.get('query', '')}{x}")
-    pos_nec.loc[:, "document"] = pos_nec["document"].apply(lambda x: f"{prompts.get('document', '')}{x}")
-    pos_nec.columns = ["anchor", "positive"]
-
-    neg = df[df["grade"] < 1]
-    neg_nec = neg[["query", "document"]]
-    neg_nec.loc[:, "query"] = neg_nec["query"].apply(lambda x: f"{prompts.get('query', '')}{x}")
-    neg_nec.loc[:, "document"] = neg_nec["document"].apply(lambda x: f"{prompts.get('document', '')}{x}")
-    neg_nec.columns = ["anchor", "negative"]
-
-    triplets = pos_nec.merge(neg_nec, on="anchor", how="inner")
-    n_samples = min(n_samples, triplets.shape[0])
-    triplets = triplets.sample(n_samples, random_state=RANDOM_STATE)[["anchor", "positive", "negative"]]
-    click.secho(triplets.head())
-    if dataset_type == "pairs":
-        click.secho(pairs.head())
-        n_samples = min(n_samples, pairs.shape[0])
-        pairs = pairs.sample(n_samples, random_state=RANDOM_STATE)
-        pairs.columns = ["sentence1", "sentence2", "score"]
-        return Dataset.from_pandas(pairs, preserve_index=False)
-    else:
-        return Dataset.from_pandas(triplets, preserve_index=False)
+os.environ["LOCAL_RANK"] = "0"
 
 
 @click.command()
 @click.option("--n_samples", default=10_000, help="Number of samples to use for training")
 def main(n_samples):
+    model = SentenceTransformer(MODEL_NAME, trust_remote_code=True)
+    dataloader = DataLoader()
     train_triplets_dataset, valid_triplets_dataset = (
-        build_dataset(esci_train_df, prompts=prompts, n_samples=n_samples),
-        build_dataset(esci_valid_df, prompts=prompts, n_samples=n_samples // 100),
-    )
-    click.secho(
-        f"Finished sampling triplets:{train_triplets_dataset.shape}, {valid_triplets_dataset.shape}",
-        fg="yellow",
+        dataloader.generate_triplets(split="train", n_samples=n_samples),
+        dataloader.generate_triplets(split="test", n_samples=n_samples // 100),
     )
 
     train_pairs_dataset, valid_pairs_dataset = (
-        build_dataset(esci_train_df, prompts=prompts, n_samples=n_samples, dataset_type="pairs"),
-        build_dataset(
-            esci_valid_df,
-            prompts=prompts,
-            n_samples=n_samples // 100,
-            dataset_type="pairs",
-        ),
-    )
-    click.secho(
-        f"Finished sampling pairs:{train_pairs_dataset.shape}, {valid_pairs_dataset.shape}",
-        fg="yellow",
+        dataloader.generate_pairs(split="train", n_samples=n_samples),
+        dataloader.generate_pairs(split="test", n_samples=n_samples // 100),
     )
 
     # guide = SentenceTransformer("cross-encoder/ms-marco-MiniLM-L-6-v2", trust_remote_code=True)
@@ -123,7 +53,11 @@ def main(n_samples):
     # pairs_loss = CoSENTLoss(model)
     train_dataset = {"triplets": train_triplets_dataset, "pairs": train_pairs_dataset}
     valid_dataset = {"triplets": valid_triplets_dataset, "pairs": valid_pairs_dataset}
-    losses = {"triplets": CachedMultipleNegativesRankingLoss(model), "pairs": AnglELoss(model)}
+    losses = {
+        "triplets": TripletLoss(model, distance_metric=TripletDistanceMetric.COSINE, triplet_margin=0.5),
+        "pairs": AnglELoss(model),
+    }
+    losses = {k: MatryoshkaLoss(model, v, [768, 512, 256, 128, 64]) for k, v in losses.items()}
 
     triplets_evaluator = TripletEvaluator(
         anchors=valid_triplets_dataset["anchor"],
@@ -132,8 +66,8 @@ def main(n_samples):
         main_distance_function=SimilarityFunction.COSINE,
     )
     pairs_evaluator = EmbeddingSimilarityEvaluator(
-        sentences1=valid_pairs_dataset["sentence1"],
-        sentences2=valid_pairs_dataset["sentence2"],
+        sentences1=valid_pairs_dataset["query"],
+        sentences2=valid_pairs_dataset["document"],
         scores=valid_pairs_dataset["score"],
         main_similarity=SimilarityFunction.COSINE,
     )
@@ -142,7 +76,7 @@ def main(n_samples):
     args = SentenceTransformerTrainingArguments(
         output_dir="models/nomic-embed-text-esci",
         run_name="nomic-embed-text-esci",
-        seed=RANDOM_STATE,
+        seed=42,
         num_train_epochs=3,
         per_device_train_batch_size=16,
         per_device_eval_batch_size=4,
@@ -178,7 +112,6 @@ def main(n_samples):
         evaluator=seq_evaluator,
         loss=losses,
         callbacks=[
-            TensorBoardCallback(),
             # EarlyStoppingCallback(early_stopping_patience=5, early_stopping_threshold=0.001),
         ],
         compute_metrics=seq_evaluator,

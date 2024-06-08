@@ -10,8 +10,7 @@ def main():
     models = [
         "nomic-ai/nomic-embed-text-v1.5",
         "lv12/esci-nomic-embed-text-v1_5_1",
-        "lv12/esci-nomic-embed-text-v1_5",
-        "models/nomic-embed-text-esci/checkpoint-50000",
+        "models/nomic-embed-text-esci/checkpoint-37000",
     ]
     sentences = [
         "search_query: shoes",
