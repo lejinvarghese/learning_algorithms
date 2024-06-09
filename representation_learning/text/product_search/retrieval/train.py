@@ -31,6 +31,7 @@ MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
 logging.basicConfig(level=logging.INFO)
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 # os.environ["LOCAL_RANK"] = "0"
+k = 10
 
 
 @click.command()
@@ -77,6 +78,9 @@ def main(n_samples):
         relevant_docs=qrels,
         show_progress_bar=True,
         corpus_chunk_size=256,
+        accuracy_at_k=[k],
+        precision_recall_at_k=[k],
+        map_at_k=[k],
         main_score_function=SimilarityFunction.COSINE,
     )
     seq_evaluator = SequentialEvaluator([triplets_evaluator, pairs_evaluator, ir_evaluator])
@@ -86,7 +90,7 @@ def main(n_samples):
         run_name="nomic-embed-text-esci",
         seed=42,
         num_train_epochs=3,
-        per_device_train_batch_size=64,
+        per_device_train_batch_size=128,
         per_device_eval_batch_size=4,
         auto_find_batch_size=True,
         gradient_accumulation_steps=2,
@@ -109,7 +113,7 @@ def main(n_samples):
         eval_steps=10,
         evaluation_strategy="steps",
         load_best_model_at_end=True,
-        metric_for_best_model="eval_cosine_accuracy",
+        metric_for_best_model="cosine_accuracy",
         gradient_checkpointing=True,
         disable_tqdm=False,
     )
