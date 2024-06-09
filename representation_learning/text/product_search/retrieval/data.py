@@ -30,17 +30,13 @@ class DataLoader:
         splits = ["train", "test"]
         datasets = []
         for split in splits:
-            data = (
-                load_dataset(
-                    self.dataset_name,
-                    columns=cols,
-                    split=split,
-                    num_proc=n_process,
-                )
-                .to_pandas()
-                .dropna()
-            )
-            data = data[data.product_locale == "us"]
+            data = load_dataset(
+                self.dataset_name,
+                columns=cols,
+                split=split,
+                num_proc=n_process,
+            ).to_pandas()
+            data = data[data.product_locale == "us"].fillna("")
             click.secho(f"Total records: {split}: {data.shape}", fg="cyan")
             data = self.__generate_scores(data)
             data = self.__generate_queries_and_documents(data)
@@ -67,13 +63,13 @@ class DataLoader:
         data["document"] = data["document"].apply(lambda x: f"{prompts.get('document', '')}{x}")
         return data
 
-    def _generate_positives(self, data, threshold):
+    def _filter_positives(self, data, threshold):
         pos = data[data["score"] >= threshold][["query", "document"]].copy()
         pos.columns = ["anchor", "positive"]
         click.secho(f"Positives: {pos.shape}", fg="green")
         return pos
 
-    def _generate_negatives(self, data, threshold):
+    def _filter_negatives(self, data, threshold):
         neg = data[data["score"] < threshold][["query", "document"]].copy()
         neg.columns = ["anchor", "negative"]
         click.secho(f"Negatives: {neg.shape}", fg="red")
@@ -100,14 +96,30 @@ class DataLoader:
             data = self.valid.copy()
         else:
             raise ValueError(f"Invalid split: {split}")
-        pos = self._generate_positives(data, threshold)
-        neg = self._generate_negatives(data, threshold)
+        pos = self._filter_positives(data, threshold)
+        neg = self._filter_negatives(data, threshold)
         triplets = pos.merge(neg, on="anchor", how="inner")
         n_samples = min(n_samples, triplets.shape[0])
         triplets = triplets.sample(n_samples, random_state=random_state)[["anchor", "positive", "negative"]]
         click.secho(f"Triplets: {triplets.shape}", fg="yellow")
         click.secho(triplets.head(), fg="yellow")
         return Dataset.from_pandas(triplets, preserve_index=False)
+
+    def generate_positives(self, split, threshold=1.0, n_samples=N_SAMPLES, random_state=RANDOM_STATE):
+        if split == "train":
+            data = self.train.copy()
+        elif split == "test":
+            data = self.valid.copy()
+        else:
+            raise ValueError(f"Invalid split: {split}")
+        pos = self._filter_positives(data, threshold)
+        n_samples = min(n_samples, pos.shape[0])
+        pos = pos.sample(n_samples, random_state=random_state)
+        if split == "test":
+            pos["score"] = threshold
+        click.secho(f"Positives: {pos.shape}", fg="yellow")
+        click.secho(pos.head(), fg="yellow")
+        return Dataset.from_pandas(pos, preserve_index=False)
 
     def generate_ir_datasets(self, split="test", threshold=1.0):
         if split == "train":

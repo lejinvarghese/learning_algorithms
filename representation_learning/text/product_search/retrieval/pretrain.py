@@ -4,12 +4,6 @@ import click
 from sentence_transformers import SentenceTransformer, SentenceTransformerTrainer
 from sentence_transformers.losses import (
     GISTEmbedLoss,
-    CachedGISTEmbedLoss,
-    MultipleNegativesRankingLoss,
-    CachedMultipleNegativesRankingLoss,
-    TripletLoss,
-    TripletDistanceMetric,
-    AnglELoss,
     MatryoshkaLoss,
 )
 from sentence_transformers.training_args import (
@@ -17,7 +11,6 @@ from sentence_transformers.training_args import (
     SentenceTransformerTrainingArguments,
 )
 from sentence_transformers.evaluation import (
-    TripletEvaluator,
     SequentialEvaluator,
     EmbeddingSimilarityEvaluator,
     SimilarityFunction,
@@ -39,37 +32,27 @@ k = 10
 def main(n_samples):
     model = SentenceTransformer(MODEL_NAME, trust_remote_code=True)
     dataloader = DataLoader()
+    train_positives_dataset, valid_positives_dataset = (
+        dataloader.generate_positives(split="train", n_samples=n_samples),
+        dataloader.generate_positives(split="test", n_samples=n_samples // 100),
+    )
+    click.secho(f"Train positives: {train_positives_dataset[0]}", fg="cyan")
+    click.secho(f"Valid positives: {valid_positives_dataset[0]}", fg="cyan")
+
     queries, corpus, qrels = dataloader.generate_ir_datasets()
-    train_triplets_dataset, valid_triplets_dataset = (
-        dataloader.generate_triplets(split="train", n_samples=n_samples),
-        dataloader.generate_triplets(split="test", n_samples=n_samples // 100),
-    )
 
-    train_pairs_dataset, valid_pairs_dataset = (
-        dataloader.generate_pairs(split="train", n_samples=n_samples),
-        dataloader.generate_pairs(split="test", n_samples=n_samples // 100),
-    )
-
-    train_dataset = {"triplets": train_triplets_dataset, "pairs": train_pairs_dataset}
-    valid_dataset = {"triplets": valid_triplets_dataset, "pairs": valid_pairs_dataset}
+    train_dataset = {"positives": train_positives_dataset}
+    valid_dataset = {"positives": valid_positives_dataset}
     guide = SentenceTransformer("cross-encoder/ms-marco-MiniLM-L-6-v2", trust_remote_code=True)
     losses = {
-        # "triplets": TripletLoss(model, distance_metric=TripletDistanceMetric.COSINE, triplet_margin=0.5),
-        "triplets": GISTEmbedLoss(model, guide=guide),
-        "pairs": AnglELoss(model),
+        "positives": GISTEmbedLoss(model, guide=guide),
     }
     losses = {k: MatryoshkaLoss(model, v, [768, 512, 256, 128, 64]) for k, v in losses.items()}
 
-    triplets_evaluator = TripletEvaluator(
-        anchors=valid_triplets_dataset["anchor"],
-        positives=valid_triplets_dataset["positive"],
-        negatives=valid_triplets_dataset["negative"],
-        main_distance_function=SimilarityFunction.COSINE,
-    )
     similarity_evaluator = EmbeddingSimilarityEvaluator(
-        sentences1=valid_pairs_dataset["anchor"],
-        sentences2=valid_pairs_dataset["document"],
-        scores=valid_pairs_dataset["score"],
+        sentences1=valid_positives_dataset["anchor"],
+        sentences2=valid_positives_dataset["positive"],
+        scores=valid_positives_dataset["score"],
         main_similarity=SimilarityFunction.COSINE,
     )
     ir_evaluator = InformationRetrievalEvaluator(
@@ -83,17 +66,17 @@ def main(n_samples):
         map_at_k=[k],
         main_score_function=SimilarityFunction.COSINE,
     )
-    seq_evaluator = SequentialEvaluator([triplets_evaluator, similarity_evaluator, ir_evaluator])
+    seq_evaluator = SequentialEvaluator([similarity_evaluator, ir_evaluator])
 
     args = SentenceTransformerTrainingArguments(
-        output_dir="models/nomic-embed-text-esci",
-        run_name="nomic-embed-text-esci",
+        output_dir="models/nomic-embed-text-pretrain-esci",
+        run_name="nomic-embed-text-pretrain-esci",
         seed=42,
         num_train_epochs=3,
-        per_device_train_batch_size=128,
+        per_device_train_batch_size=64,
         per_device_eval_batch_size=4,
         auto_find_batch_size=True,
-        gradient_accumulation_steps=2,
+        gradient_accumulation_steps=4,
         warmup_ratio=0.01,
         learning_rate=5e-7,
         lr_scheduler_type="reduce_lr_on_plateau",
@@ -102,15 +85,15 @@ def main(n_samples):
         bf16=False,
         batch_sampler=BatchSamplers.NO_DUPLICATES,
         save_strategy="steps",
-        save_steps=5000,
-        save_total_limit=10,
-        logging_steps=10,
+        save_steps=1000,
+        save_total_limit=20,
+        logging_steps=100,
         dataloader_num_workers=4,
         dataloader_prefetch_factor=4,
         dataloader_drop_last=True,
         do_eval=True,
         eval_delay=0,
-        eval_steps=10,
+        eval_steps=200,
         evaluation_strategy="steps",
         load_best_model_at_end=True,
         metric_for_best_model="cosine_accuracy",
