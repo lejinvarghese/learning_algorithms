@@ -7,6 +7,7 @@ DATASET_NAME = "tasksource/esci"
 N_SAMPLES = 1_000_000
 RANDOM_STATE = 42
 N_PROCESS = cpu_count() - 2
+np.random.seed(RANDOM_STATE)
 
 
 class DataLoader:
@@ -66,13 +67,13 @@ class DataLoader:
         data["document"] = data["document"].apply(lambda x: f"{prompts.get('document', '')}{x}")
         return data
 
-    def _generate_positives(self, data, threshold=1.0):
+    def _generate_positives(self, data, threshold):
         pos = data[data["score"] >= threshold][["query", "document"]].copy()
         pos.columns = ["anchor", "positive"]
         click.secho(f"Positives: {pos.shape}", fg="green")
         return pos
 
-    def _generate_negatives(self, data, threshold=1.0):
+    def _generate_negatives(self, data, threshold):
         neg = data[data["score"] < threshold][["query", "document"]].copy()
         neg.columns = ["anchor", "negative"]
         click.secho(f"Negatives: {neg.shape}", fg="red")
@@ -87,22 +88,57 @@ class DataLoader:
             raise ValueError(f"Invalid split: {split}")
         n_samples = min(n_samples, data.shape[0])
         pairs = data.sample(n_samples, random_state=random_state)[["query", "document", "score"]]
+        pairs.columns = ["anchor", "document", "score"]
         click.secho(f"Pairs: {pairs.shape}", fg="yellow")
         click.secho(pairs.head(), fg="yellow")
         return Dataset.from_pandas(pairs, preserve_index=False)
 
-    def generate_triplets(self, split, n_samples=N_SAMPLES, random_state=RANDOM_STATE):
+    def generate_triplets(self, split, threshold=1.0, n_samples=N_SAMPLES, random_state=RANDOM_STATE):
         if split == "train":
             data = self.train.copy()
         elif split == "test":
             data = self.valid.copy()
         else:
             raise ValueError(f"Invalid split: {split}")
-        pos = self._generate_positives(data)
-        neg = self._generate_negatives(data)
+        pos = self._generate_positives(data, threshold)
+        neg = self._generate_negatives(data, threshold)
         triplets = pos.merge(neg, on="anchor", how="inner")
         n_samples = min(n_samples, triplets.shape[0])
         triplets = triplets.sample(n_samples, random_state=random_state)[["anchor", "positive", "negative"]]
         click.secho(f"Triplets: {triplets.shape}", fg="yellow")
         click.secho(triplets.head(), fg="yellow")
         return Dataset.from_pandas(triplets, preserve_index=False)
+
+    def generate_ir_datasets(self, split="test", threshold=1.0):
+        if split == "train":
+            data = self.train.copy()
+        elif split == "test":
+            data = self.valid.copy()
+        else:
+            raise ValueError(f"Invalid split: {split}")
+
+        data = data[data["score"] >= threshold]
+        query_docs = data["query"].unique()
+        n_samples = min(len(query_docs), 1000)
+        query_docs = np.random.choice(query_docs, n_samples, replace=False)
+
+        data = data[data["query"].isin(query_docs)]
+        corpus_docs = data["document"].unique()
+
+        corpus_ids, query_ids = range(1, len(corpus_docs) + 1), range(1, len(query_docs) + 1)
+        corpus, queries = dict(zip(corpus_ids, corpus_docs)), dict(zip(query_ids, query_docs))
+        corpus_inverted, queries_inverted = {v: k for k, v in corpus.items()}, {v: k for k, v in queries.items()}
+
+        click.secho(f"Queries: {len(queries)}", fg="yellow")
+        click.secho(f"Corpus: {len(corpus)}", fg="yellow")
+
+        relevant_docs = {}
+
+        for q, d in zip(data["query"], data["document"]):
+            qid = queries_inverted.get(q, -1)
+            corpus_ids = corpus_inverted.get(d, -1)
+            if qid not in relevant_docs:
+                relevant_docs[qid] = set()
+            relevant_docs[qid].add(corpus_ids)
+
+        return queries, corpus, relevant_docs

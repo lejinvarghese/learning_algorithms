@@ -3,6 +3,7 @@ import logging
 import click
 from sentence_transformers import SentenceTransformer, SentenceTransformerTrainer
 from sentence_transformers.losses import (
+    GISTEmbedLoss,
     CachedGISTEmbedLoss,
     MultipleNegativesRankingLoss,
     CachedMultipleNegativesRankingLoss,
@@ -20,6 +21,7 @@ from sentence_transformers.evaluation import (
     SequentialEvaluator,
     EmbeddingSimilarityEvaluator,
     SimilarityFunction,
+    InformationRetrievalEvaluator,
 )
 from transformers import EarlyStoppingCallback
 
@@ -28,7 +30,7 @@ from data import DataLoader
 MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
 logging.basicConfig(level=logging.INFO)
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
-os.environ["LOCAL_RANK"] = "0"
+# os.environ["LOCAL_RANK"] = "0"
 
 
 @click.command()
@@ -36,6 +38,7 @@ os.environ["LOCAL_RANK"] = "0"
 def main(n_samples):
     model = SentenceTransformer(MODEL_NAME, trust_remote_code=True)
     dataloader = DataLoader()
+    queries, corpus, qrels = dataloader.generate_ir_datasets()
     train_triplets_dataset, valid_triplets_dataset = (
         dataloader.generate_triplets(split="train", n_samples=n_samples),
         dataloader.generate_triplets(split="test", n_samples=n_samples // 100),
@@ -46,15 +49,12 @@ def main(n_samples):
         dataloader.generate_pairs(split="test", n_samples=n_samples // 100),
     )
 
-    # guide = SentenceTransformer("cross-encoder/ms-marco-MiniLM-L-6-v2", trust_remote_code=True)
-    # loss = CachedGISTEmbedLoss(model, guide=guide, mini_batch_size=4)
-    # loss = CachedMultipleNegativesRankingLoss(model)
-
-    # pairs_loss = CoSENTLoss(model)
     train_dataset = {"triplets": train_triplets_dataset, "pairs": train_pairs_dataset}
     valid_dataset = {"triplets": valid_triplets_dataset, "pairs": valid_pairs_dataset}
+    guide = SentenceTransformer("cross-encoder/ms-marco-MiniLM-L-6-v2", trust_remote_code=True)
     losses = {
-        "triplets": TripletLoss(model, distance_metric=TripletDistanceMetric.COSINE, triplet_margin=0.5),
+        # "triplets": TripletLoss(model, distance_metric=TripletDistanceMetric.COSINE, triplet_margin=0.5),
+        "triplets": GISTEmbedLoss(model, guide=guide),
         "pairs": AnglELoss(model),
     }
     losses = {k: MatryoshkaLoss(model, v, [768, 512, 256, 128, 64]) for k, v in losses.items()}
@@ -66,42 +66,52 @@ def main(n_samples):
         main_distance_function=SimilarityFunction.COSINE,
     )
     pairs_evaluator = EmbeddingSimilarityEvaluator(
-        sentences1=valid_pairs_dataset["query"],
+        sentences1=valid_pairs_dataset["anchor"],
         sentences2=valid_pairs_dataset["document"],
         scores=valid_pairs_dataset["score"],
         main_similarity=SimilarityFunction.COSINE,
     )
-    seq_evaluator = SequentialEvaluator([triplets_evaluator, pairs_evaluator])
+    ir_evaluator = InformationRetrievalEvaluator(
+        queries=queries,
+        corpus=corpus,
+        relevant_docs=qrels,
+        show_progress_bar=True,
+        corpus_chunk_size=256,
+        main_score_function=SimilarityFunction.COSINE,
+    )
+    seq_evaluator = SequentialEvaluator([triplets_evaluator, pairs_evaluator, ir_evaluator])
 
     args = SentenceTransformerTrainingArguments(
         output_dir="models/nomic-embed-text-esci",
         run_name="nomic-embed-text-esci",
         seed=42,
         num_train_epochs=3,
-        per_device_train_batch_size=16,
+        per_device_train_batch_size=64,
         per_device_eval_batch_size=4,
-        # auto_find_batch_size=True,
+        auto_find_batch_size=True,
         gradient_accumulation_steps=2,
         warmup_ratio=0.01,
-        learning_rate=1e-6,
-        lr_scheduler_type="cosine_with_restarts",
+        learning_rate=5e-7,
+        lr_scheduler_type="reduce_lr_on_plateau",
+        # lr_scheduler_kwargs={"num_cycles": 1},
         fp16=False,
         bf16=False,
         batch_sampler=BatchSamplers.NO_DUPLICATES,
         save_strategy="steps",
-        save_steps=1000,
+        save_steps=5000,
         save_total_limit=10,
-        logging_steps=100,
-        eval_steps=1000,
+        logging_steps=10,
         dataloader_num_workers=4,
         dataloader_prefetch_factor=4,
-        disable_tqdm=False,
-        evaluation_strategy="steps",
         dataloader_drop_last=True,
+        do_eval=True,
+        eval_delay=0,
+        eval_steps=10,
+        evaluation_strategy="steps",
         load_best_model_at_end=True,
-        metric_for_best_model="cosine_accuracy",
-        lr_scheduler_kwargs={"num_cycles": 1},
+        metric_for_best_model="eval_cosine_accuracy",
         gradient_checkpointing=True,
+        disable_tqdm=False,
     )
 
     # 4. Create a trainer & train
@@ -112,7 +122,7 @@ def main(n_samples):
         evaluator=seq_evaluator,
         loss=losses,
         callbacks=[
-            # EarlyStoppingCallback(early_stopping_patience=5, early_stopping_threshold=0.001),
+            EarlyStoppingCallback(early_stopping_patience=5, early_stopping_threshold=0.001),
         ],
         compute_metrics=seq_evaluator,
         args=args,
