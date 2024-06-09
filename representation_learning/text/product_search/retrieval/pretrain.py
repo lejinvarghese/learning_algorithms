@@ -36,6 +36,7 @@ def main(n_samples):
         dataloader.generate_positives(split="train", n_samples=n_samples),
         dataloader.generate_positives(split="test", n_samples=n_samples // 100),
     )
+    valid_pairs_dataset = dataloader.generate_pairs(split="test", n_samples=n_samples // 100)
 
     queries, corpus, qrels = dataloader.generate_ir_datasets()
 
@@ -48,9 +49,9 @@ def main(n_samples):
     losses = {k: MatryoshkaLoss(model, v, [768, 512, 256, 128, 64]) for k, v in losses.items()}
 
     similarity_evaluator = EmbeddingSimilarityEvaluator(
-        sentences1=valid_positives_dataset["anchor"],
-        sentences2=valid_positives_dataset["positive"],
-        scores=valid_positives_dataset["score"],
+        sentences1=valid_pairs_dataset["anchor"],
+        sentences2=valid_pairs_dataset["document"],
+        scores=valid_pairs_dataset["score"],
         main_similarity=SimilarityFunction.COSINE,
     )
     ir_evaluator = InformationRetrievalEvaluator(
@@ -75,15 +76,15 @@ def main(n_samples):
         per_device_eval_batch_size=4,
         auto_find_batch_size=True,
         gradient_accumulation_steps=4,
-        warmup_ratio=0.01,
+        warmup_ratio=0.02,
         learning_rate=5e-7,
-        lr_scheduler_type="reduce_lr_on_plateau",
+        lr_scheduler_type="polynomial",
         # lr_scheduler_kwargs={"num_cycles": 1},
         fp16=False,
         bf16=False,
         batch_sampler=BatchSamplers.NO_DUPLICATES,
         save_strategy="steps",
-        save_steps=1000,
+        save_steps=100,
         save_total_limit=20,
         logging_steps=100,
         dataloader_num_workers=4,
@@ -91,10 +92,10 @@ def main(n_samples):
         dataloader_drop_last=True,
         do_eval=True,
         eval_delay=0,
-        eval_steps=200,
+        eval_steps=100,
         evaluation_strategy="steps",
         load_best_model_at_end=True,
-        metric_for_best_model="cosine_accuracy",
+        metric_for_best_model=f"eval_cosine_ndcg@{k}",
         gradient_checkpointing=True,
         disable_tqdm=False,
     )

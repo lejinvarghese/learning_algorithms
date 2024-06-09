@@ -115,8 +115,7 @@ class DataLoader:
         pos = self._filter_positives(data, threshold)
         n_samples = min(n_samples, pos.shape[0])
         pos = pos.sample(n_samples, random_state=random_state)
-        if split == "test":
-            pos["score"] = threshold
+        pos["score"] = threshold
         return Dataset.from_pandas(pos, preserve_index=False)
 
     def generate_ir_datasets(self, split="test", threshold=1.0):
