@@ -36,8 +36,6 @@ def main(n_samples):
         dataloader.generate_positives(split="train", n_samples=n_samples),
         dataloader.generate_positives(split="test", n_samples=n_samples // 100),
     )
-    click.secho(f"Train positives: {train_positives_dataset[0]}", fg="cyan")
-    click.secho(f"Valid positives: {valid_positives_dataset[0]}", fg="cyan")
 
     queries, corpus, qrels = dataloader.generate_ir_datasets()
 

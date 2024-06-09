@@ -117,8 +117,6 @@ class DataLoader:
         pos = pos.sample(n_samples, random_state=random_state)
         if split == "test":
             pos["score"] = threshold
-        click.secho(f"Positives: {pos.shape}", fg="yellow")
-        click.secho(pos.head(), fg="yellow")
         return Dataset.from_pandas(pos, preserve_index=False)
 
     def generate_ir_datasets(self, split="test", threshold=1.0):
