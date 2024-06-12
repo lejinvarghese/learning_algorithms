@@ -3,7 +3,7 @@ import click
 import numpy as np
 from datasets import load_dataset, Dataset
 
-DATASET_NAME = "tasksource/esci"
+DATASET_ID = "tasksource/esci"
 N_SAMPLES = 1_000_000
 RANDOM_STATE = 42
 N_PROCESS = cpu_count() - 2
@@ -13,9 +13,9 @@ np.random.seed(RANDOM_STATE)
 class DataLoader:
     def __init__(
         self,
-        dataset_name=DATASET_NAME,
+        dataset_id=DATASET_ID,
     ):
-        self.dataset_name = dataset_name
+        self.dataset_id = dataset_id
         self.train, self.valid = self.__download_dataset()
 
     def __download_dataset(self, n_process=N_PROCESS):
@@ -31,7 +31,7 @@ class DataLoader:
         datasets = []
         for split in splits:
             data = load_dataset(
-                self.dataset_name,
+                self.dataset_id,
                 columns=cols,
                 split=split,
                 num_proc=n_process,
