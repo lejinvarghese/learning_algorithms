@@ -89,21 +89,23 @@ class DataLoader:
         click.secho(pairs.head(), fg="yellow")
         return Dataset.from_pandas(pairs, preserve_index=False)
 
-    def generate_triplets(self, split, threshold=1.0, n_samples=N_SAMPLES, random_state=RANDOM_STATE):
+    def generate_triplets(
+        self, split, positives_threshold=1.0, negatives_threshold=1.0, n_samples=N_SAMPLES, random_state=RANDOM_STATE
+    ):
         if split == "train":
             data = self.train.copy()
         elif split == "test":
             data = self.valid.copy()
         else:
             raise ValueError(f"Invalid split: {split}")
-        pos = self._filter_positives(data, threshold)
-        neg = self._filter_negatives(data, threshold)
+        pos = self._filter_positives(data, positives_threshold)
+        neg = self._filter_negatives(data, negatives_threshold)
         triplets = pos.merge(neg, on="anchor", how="inner")
         n_samples = min(n_samples, triplets.shape[0])
         triplets = triplets.sample(n_samples, random_state=random_state)[["anchor", "positive", "negative"]]
         click.secho(f"Triplets: {triplets.shape}", fg="yellow")
         click.secho(triplets.head(), fg="yellow")
-        return Dataset.from_pandas(triplets, preserve_index=False)
+        return Dataset.from_pandas(triplets, preserve_index=False).shuffle(seed=RANDOM_STATE)
 
     def generate_positives(self, split, threshold=1.0, n_samples=N_SAMPLES, random_state=RANDOM_STATE):
         if split == "train":

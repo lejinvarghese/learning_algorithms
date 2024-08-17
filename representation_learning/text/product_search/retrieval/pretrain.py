@@ -2,7 +2,7 @@ import os
 import logging
 import click
 from sentence_transformers import SentenceTransformer, SentenceTransformerTrainer
-from sentence_transformers.losses import GISTEmbedLoss, MatryoshkaLoss, CachedGISTEmbedLoss
+from sentence_transformers.losses import CachedGISTEmbedLoss
 from sentence_transformers.training_args import (
     BatchSamplers,
     SentenceTransformerTrainingArguments,
@@ -45,7 +45,6 @@ def main(n_samples):
     losses = {
         "positives": CachedGISTEmbedLoss(model, guide=guide),
     }
-    # losses = {k: MatryoshkaLoss(model, v, [768, 512, 256, 128, 64]) for k, v in losses.items()}
 
     triplets_evaluator = TripletEvaluator(
         anchors=valid_triplets_dataset["anchor"],

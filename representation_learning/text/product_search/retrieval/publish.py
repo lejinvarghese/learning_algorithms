@@ -1,7 +1,7 @@
 from sentence_transformers import SentenceTransformer
 
 model = SentenceTransformer(
-    "models/nomic-embed-text-esci/checkpoint-37000",
+    "models/nomic-embed-text-train-esci/checkpoint-2000",
     trust_remote_code=True,
 )
 model.push_to_hub(
@@ -10,5 +10,5 @@ model.push_to_hub(
     exist_ok=True,
     replace_model_card=True,
     train_datasets="tasksource/esci",
-    commit_message="full set multi loss ESCI triplets",
+    commit_message="multi stage tuning",
 )

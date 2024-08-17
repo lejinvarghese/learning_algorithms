@@ -1,8 +1,8 @@
 # Train
 
 ```bash
-python3.10 -m train --n_samples
-python3.10 -m torch.distributed.run --nproc_per_node=1 --nnodes=1 --master_port=12345 train.py
+python3.10 -m train --n_samples 1_000_000
+python3.10 -m torch.distributed.run --nproc_per_node=1 --nnodes=1 --master_port=12345 train.py --n_samples 1_600_000
  ```
 
 ## Plots

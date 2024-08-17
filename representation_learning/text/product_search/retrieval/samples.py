@@ -10,7 +10,7 @@ def main():
     models = [
         "nomic-ai/nomic-embed-text-v1.5",
         "lv12/esci-nomic-embed-text-v1_5_1",
-        "models/nomic-embed-text-pretrain-esci/checkpoint-6000",
+        "models/nomic-embed-text-train-esci/checkpoint-20000",
     ]
     sentences = [
         "search_query: shoes",
@@ -18,10 +18,13 @@ def main():
         "search_query: adidas",
         "search_query: nike shoes",
         "search_query: adidas shoes",
+        "search_query: guitar",
         "search_document: Nike Air Max Dn, Nike, White",
         "search_document: Nike Sportswear Tech Fleece Windrunner, Nike, Black",
         "search_document: Gazelle Indoor Shoes, Adidas, Green",
         "search_document: Adicolor Crew Sweatshirt Set, Adidas, Green",
+        "search_document: Electric Guitar, Green",
+        "search_document: Guitar strings, Green",
     ]
     results = {}
     for m in models:
