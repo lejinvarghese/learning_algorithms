@@ -79,8 +79,9 @@ class ThreeTowerRetrievalModel(nn.Module):
 
         # Encode the document vision
         doc_vision_inputs = self.doc_vision_processor(doc_images, return_tensors="pt")
+        print(doc_vision_inputs.keys())
         doc_vision_outputs = self.doc_vision_encoder(
-            **doc_vision_inputs
+            doc_vision_inputs["pixel_values"]
         ).last_hidden_state
         doc_vision_embedding = F.normalize(doc_vision_outputs[:, 0], p=2, dim=1)
 
