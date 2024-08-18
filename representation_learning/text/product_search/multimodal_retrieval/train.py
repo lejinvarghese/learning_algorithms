@@ -1,6 +1,6 @@
 import click
 import torch
-from data_loader import MultimodalDataset, MultimodalDataLoader
+from data_loader import Preprocessor
 
 
 @click.command()
@@ -9,7 +9,7 @@ from data_loader import MultimodalDataset, MultimodalDataLoader
 def main(batch_size, sample_size):
     text_model_name = "nomic-ai/nomic-embed-text-v1.5"
     vision_model_name = "nomic-ai/nomic-embed-vision-v1.5"
-    dataloader = MultimodalDataLoader(
+    dataloader = Preprocessor(
         text_model_name,
         vision_model_name,
         sample_size=sample_size,

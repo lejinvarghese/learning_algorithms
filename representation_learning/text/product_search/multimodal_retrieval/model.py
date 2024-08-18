@@ -2,9 +2,11 @@ import click
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers import AutoTokenizer, AutoModel, AutoImageProcessor
+from transformers import AutoModel
 from PIL import Image
 import requests
+
+from data_loader import Preprocessor
 
 
 class ThreeTowerRetrievalModel(nn.Module):
@@ -14,21 +16,14 @@ class ThreeTowerRetrievalModel(nn.Module):
         super().__init__()
 
         # Text stem tower
-        self.text_tokenizer = AutoTokenizer.from_pretrained(text_model_name)
         self.text_encoder = AutoModel.from_pretrained(
             text_model_name, trust_remote_code=True
-        )
-        self.text_encoder.eval()
+        ).eval()
 
         # Document vision tower
-        self.doc_vision_processor = AutoImageProcessor.from_pretrained(
-            vision_model_name
-        )
         self.doc_vision_encoder = AutoModel.from_pretrained(
             vision_model_name, trust_remote_code=True
-        )
-        self.doc_vision_encoder.eval()
-
+        ).eval()
         for param in self.text_encoder.parameters():
             param.requires_grad = False
 
@@ -61,28 +56,18 @@ class ThreeTowerRetrievalModel(nn.Module):
     def forward(self, queries, doc_texts, doc_images):
         # Encode the query
 
-        encoded_queries = self.text_tokenizer(
-            queries, padding=True, truncation=True, return_tensors="pt"
-        )
-        encoded_doc_texts = self.text_tokenizer(
-            doc_texts, padding=True, truncation=True, return_tensors="pt"
-        )
         with torch.no_grad():
-            query_outputs = self.text_encoder(**encoded_queries)
-            doc_text_outputs = self.text_encoder(**encoded_doc_texts)
+            query_outputs = self.text_encoder(**queries)
+            doc_text_outputs = self.text_encoder(**doc_texts)
         query_embedding = self.mean_pool_normalize(
-            query_outputs, encoded_queries["attention_mask"]
+            query_outputs, queries["attention_mask"]
         )
         doc_text_embedding = self.mean_pool_normalize(
-            doc_text_outputs, encoded_doc_texts["attention_mask"]
+            doc_text_outputs, doc_texts["attention_mask"]
         )
 
         # Encode the document vision
-        doc_vision_inputs = self.doc_vision_processor(doc_images, return_tensors="pt")
-        print(doc_vision_inputs.keys())
-        doc_vision_outputs = self.doc_vision_encoder(
-            doc_vision_inputs["pixel_values"]
-        ).last_hidden_state
+        doc_vision_outputs = self.doc_vision_encoder(**doc_images).last_hidden_state
         doc_vision_embedding = F.normalize(doc_vision_outputs[:, 0], p=2, dim=1)
 
         # # Combine document embeddings (e.g., sum or concatenate)
@@ -92,36 +77,55 @@ class ThreeTowerRetrievalModel(nn.Module):
         # doc_embedding = F.concat(doc_text_embedding + doc_vision_embedding)
 
         return (
-            project_query_embedding,
-            project_doc_text_embedding,
-            project_doc_vision_embedding,
+            query_embedding,
+            doc_text_embedding,
+            doc_vision_embedding,
         )
 
 
-if __name__ == "__main__":
+def main():
     text_model_name = "nomic-ai/nomic-embed-text-v1.5"
     vision_model_name = "nomic-ai/nomic-embed-vision-v1.5"
     embedding_dim = 256
+    p = Preprocessor(
+        text_model_name,
+        vision_model_name,
+    )
 
     model = ThreeTowerRetrievalModel(text_model_name, vision_model_name, embedding_dim)
 
     queries = [
         "search_query: What are cute animals to cuddle with?",
-        "search_query: What do cats look like?",
+        "search_query: Why do people like raccoons?",
     ]
-    documents = [
-        "search_document: Cats and raccoons",
-        "search_document: Sweeter than raccoons",
+    doc_texts = [
+        "search_document: Kittens all the way to the moon",
+        "search_document: Raccoons are cute and cuddly",
     ]
 
     urls = [
         "http://images.cocodataset.org/val2017/000000039769.jpg",
-        "http://images.cocodataset.org/val2017/000000039769.jpg",
+        "https://media.istockphoto.com/id/1272108713/photo/little-raccoon-face-looking-through-wooden-deck-rails.jpg?s=612x612&w=0&k=20&c=UhlpTfx66zFDmqloqXAqy7S9Uq7bE_Sy9CzjjZmnouM=",
     ]
-    images = [Image.open(requests.get(u, stream=True).raw) for u in urls]
+    doc_images = [Image.open(requests.get(u, stream=True).raw) for u in urls]
+    anchor = p.text_processor(
+        queries,
+        padding="max_length",
+        truncation=True,
+        max_length=128,
+        return_tensors="pt",
+    )
+    doc_texts = p.text_processor(
+        doc_texts,
+        padding="max_length",
+        truncation=True,
+        max_length=1024,
+        return_tensors="pt",
+    )
+    doc_images = p.image_processor(doc_images, return_tensors="pt")
 
     query_embedding, doc_text_embedding, doc_vision_embedding = model(
-        queries, documents, images
+        anchor, doc_texts, doc_images
     )
 
     click.secho(f"Query Embedding Shape: {query_embedding.shape}", fg="yellow")
@@ -131,3 +135,17 @@ if __name__ == "__main__":
     click.secho(
         f"Document Vision Embedding Shape: {doc_vision_embedding.shape}", fg="yellow"
     )
+
+    cosine_similarities = F.cosine_similarity(
+        query_embedding, doc_text_embedding, dim=1
+    )
+    click.secho(f"Similarity: Query vs Doc Text: {cosine_similarities}", fg="green")
+
+    cosine_similarities = F.cosine_similarity(
+        query_embedding, doc_vision_embedding, dim=1
+    )
+    click.secho(f"Similarity: Query vs Doc Vision: {cosine_similarities}", fg="green")
+
+
+if __name__ == "__main__":
+    main()
