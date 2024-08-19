@@ -100,9 +100,9 @@ class Preprocessor:
             Image.open(BytesIO(example["product_image"])), return_tensors="pt"
         )
         return {
-            "anchor_input_ids": anchor["input_ids"],
+            "anchor_input_ids": anchor["input_ids"].squeeze(0),
             "anchor_attention_mask": anchor["attention_mask"].squeeze(0),
-            "doc_text_input_ids": doc_texts["input_ids"],
+            "doc_text_input_ids": doc_texts["input_ids"].squeeze(0),
             "doc_text_attention_mask": doc_texts["attention_mask"].squeeze(0),
             "doc_vision_pixel_values": doc_images["pixel_values"].squeeze(0),
         }

@@ -14,16 +14,19 @@ class ThreeTowerRetrievalModel(nn.Module):
         self, text_model_name: str, vision_model_name: str, embedding_dim: int
     ):
         super().__init__()
+        self.device = (
+            torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        )
 
         # Text stem tower
         self.text_encoder = AutoModel.from_pretrained(
             text_model_name, trust_remote_code=True
-        ).eval()
+        )
 
         # Document vision tower
         self.doc_vision_encoder = AutoModel.from_pretrained(
             vision_model_name, trust_remote_code=True
-        ).eval()
+        )
         for param in self.text_encoder.parameters():
             param.requires_grad = False
 
@@ -38,6 +41,7 @@ class ThreeTowerRetrievalModel(nn.Module):
         self.doc_vision_proj = nn.Linear(
             self.doc_vision_encoder.config.hidden_size, embedding_dim
         )
+        self.to(self.device)
 
     def mean_pool_normalize(self, model_output, attention_mask):
         token_embeddings = model_output[0]
@@ -53,8 +57,20 @@ class ThreeTowerRetrievalModel(nn.Module):
         text_embedding = F.normalize(text_embedding, p=2, dim=1)
         return text_embedding
 
-    def forward(self, queries, doc_texts, doc_images):
+    def forward(self, batch):
         # Encode the query
+        queries = {
+            "input_ids": batch["anchor_input_ids"],
+            "attention_mask": batch["anchor_attention_mask"],
+        }
+        doc_texts = {
+            "input_ids": batch["doc_text_input_ids"],
+            "attention_mask": batch["doc_text_attention_mask"],
+        }
+        doc_images = {"pixel_values": batch["doc_vision_pixel_values"]}
+
+        # click.secho(f"Queries: {queries['attention_mask'].shape}", fg="yellow")
+        # click.secho(f"Doc Texts: {doc_texts['attention_mask'].shape}", fg="yellow")
 
         with torch.no_grad():
             query_outputs = self.text_encoder(**queries)
@@ -71,15 +87,15 @@ class ThreeTowerRetrievalModel(nn.Module):
         doc_vision_embedding = F.normalize(doc_vision_outputs[:, 0], p=2, dim=1)
 
         # # Combine document embeddings (e.g., sum or concatenate)
-        project_query_embedding = self.query_proj(query_embedding)
-        project_doc_text_embedding = self.doc_text_proj(doc_text_embedding)
-        project_doc_vision_embedding = self.doc_vision_proj(doc_vision_embedding)
+        pro_query_embedding = self.query_proj(query_embedding)
+        pro_doc_text_embedding = self.doc_text_proj(doc_text_embedding)
+        pro_doc_vision_embedding = self.doc_vision_proj(doc_vision_embedding)
         # doc_embedding = F.concat(doc_text_embedding + doc_vision_embedding)
 
         return (
-            query_embedding,
-            doc_text_embedding,
-            doc_vision_embedding,
+            pro_query_embedding,
+            pro_doc_text_embedding,
+            pro_doc_vision_embedding,
         )
 
 
@@ -123,10 +139,14 @@ def main():
         return_tensors="pt",
     )
     doc_images = p.image_processor(doc_images, return_tensors="pt")
-
-    query_embedding, doc_text_embedding, doc_vision_embedding = model(
-        anchor, doc_texts, doc_images
-    )
+    inputs = {
+        "anchor_input_ids": anchor["input_ids"],
+        "anchor_attention_mask": anchor["attention_mask"].squeeze(0),
+        "doc_text_input_ids": doc_texts["input_ids"],
+        "doc_text_attention_mask": doc_texts["attention_mask"].squeeze(0),
+        "doc_vision_pixel_values": doc_images["pixel_values"].squeeze(0),
+    }
+    query_embedding, doc_text_embedding, doc_vision_embedding = model(inputs)
 
     click.secho(f"Query Embedding Shape: {query_embedding.shape}", fg="yellow")
     click.secho(
