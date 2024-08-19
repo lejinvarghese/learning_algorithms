@@ -9,6 +9,32 @@ import requests
 from data_loader import Preprocessor
 
 
+class ProjectionHead(nn.Module):
+    def __init__(self, input_dim=768, output_dim=768, n_layers=1, dropout=0.1):
+        super().__init__()
+
+        blocks = [
+            nn.Linear(input_dim, output_dim),
+            nn.GELU(),
+            nn.BatchNorm1d(output_dim),
+            nn.Dropout(dropout),
+        ]
+        layers = []
+        for _ in range(n_layers):
+            layers.extend(blocks)
+        blocks.pop(1)
+        layers.extend(
+            [
+                nn.Linear(output_dim, output_dim),
+            ]
+        )
+        self.proj = nn.Sequential(*layers)
+
+    def forward(self, x):
+        x = self.proj(x)
+        return x
+
+
 class ThreeTowerRetrievalModel(nn.Module):
     def __init__(
         self, text_model_name: str, vision_model_name: str, embedding_dim: int
@@ -17,6 +43,7 @@ class ThreeTowerRetrievalModel(nn.Module):
         self.device = (
             torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         )
+        self.embedding_dim = embedding_dim
 
         # Text stem tower
         self.text_encoder = AutoModel.from_pretrained(
@@ -33,14 +60,9 @@ class ThreeTowerRetrievalModel(nn.Module):
         for param in self.doc_vision_encoder.parameters():
             param.requires_grad = False
 
-        # Linear layers to project into a common embedding space
-        self.query_proj = nn.Linear(self.text_encoder.config.hidden_size, embedding_dim)
-        self.doc_text_proj = nn.Linear(
-            self.text_encoder.config.hidden_size, embedding_dim
-        )
-        self.doc_vision_proj = nn.Linear(
-            self.doc_vision_encoder.config.hidden_size, embedding_dim
-        )
+        self.query_proj = ProjectionHead()
+        self.doc_text_proj = ProjectionHead()
+        self.doc_vision_proj = ProjectionHead()
         self.to(self.device)
 
     def mean_pool_normalize(self, model_output, attention_mask):
@@ -69,9 +91,6 @@ class ThreeTowerRetrievalModel(nn.Module):
         }
         doc_images = {"pixel_values": batch["doc_vision_pixel_values"]}
 
-        # click.secho(f"Queries: {queries['attention_mask'].shape}", fg="yellow")
-        # click.secho(f"Doc Texts: {doc_texts['attention_mask'].shape}", fg="yellow")
-
         with torch.no_grad():
             query_outputs = self.text_encoder(**queries)
             doc_text_outputs = self.text_encoder(**doc_texts)
@@ -86,16 +105,32 @@ class ThreeTowerRetrievalModel(nn.Module):
         doc_vision_outputs = self.doc_vision_encoder(**doc_images).last_hidden_state
         doc_vision_embedding = F.normalize(doc_vision_outputs[:, 0], p=2, dim=1)
 
-        # # Combine document embeddings (e.g., sum or concatenate)
         pro_query_embedding = self.query_proj(query_embedding)
         pro_doc_text_embedding = self.doc_text_proj(doc_text_embedding)
         pro_doc_vision_embedding = self.doc_vision_proj(doc_vision_embedding)
-        # doc_embedding = F.concat(doc_text_embedding + doc_vision_embedding)
+        pro_doc_text_vision_embedding = (
+            pro_doc_text_embedding * pro_doc_vision_embedding
+        )
+
+        pro_doc_embedding = torch.cat(
+            [
+                pro_doc_text_embedding,
+                pro_doc_vision_embedding,
+                pro_doc_text_vision_embedding,
+            ],
+            dim=1,
+        )
+        pro_doc_embedding = nn.Dropout(p=0.3)(pro_doc_embedding)
+        pro_doc_embedding = nn.Linear(self.embedding_dim * 3, self.embedding_dim)(
+            pro_doc_embedding
+        )
 
         return (
             pro_query_embedding,
-            pro_doc_text_embedding,
-            pro_doc_vision_embedding,
+            pro_doc_embedding,
+            query_embedding,
+            doc_text_embedding,
+            doc_vision_embedding,
         )
 
 
@@ -146,25 +181,13 @@ def main():
         "doc_text_attention_mask": doc_texts["attention_mask"].squeeze(0),
         "doc_vision_pixel_values": doc_images["pixel_values"].squeeze(0),
     }
-    query_embedding, doc_text_embedding, doc_vision_embedding = model(inputs)
+    query_embedding, doc_embedding, _, _, _ = model(inputs)
 
     click.secho(f"Query Embedding Shape: {query_embedding.shape}", fg="yellow")
-    click.secho(
-        f"Document Text Embedding Shape: {doc_text_embedding.shape}", fg="yellow"
-    )
-    click.secho(
-        f"Document Vision Embedding Shape: {doc_vision_embedding.shape}", fg="yellow"
-    )
+    click.secho(f"Document Embedding Shape: {doc_embedding.shape}", fg="yellow")
 
-    cosine_similarities = F.cosine_similarity(
-        query_embedding, doc_text_embedding, dim=1
-    )
+    cosine_similarities = F.cosine_similarity(query_embedding, doc_embedding, dim=1)
     click.secho(f"Similarity: Query vs Doc Text: {cosine_similarities}", fg="green")
-
-    cosine_similarities = F.cosine_similarity(
-        query_embedding, doc_vision_embedding, dim=1
-    )
-    click.secho(f"Similarity: Query vs Doc Vision: {cosine_similarities}", fg="green")
 
 
 if __name__ == "__main__":

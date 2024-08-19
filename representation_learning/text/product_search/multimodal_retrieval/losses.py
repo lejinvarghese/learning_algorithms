@@ -30,11 +30,24 @@ class MultipleNegativesSymmetricRankingLoss(nn.Module):
     def forward(
         self,
         anchor,
-        positive_text,
-        positive_vision,
+        positive,
+        reference_anchor,
+        reference_positive_text,
+        reference_positive_vision,
         negative_text=None,
         negative_vision=None,
     ):
-        text_loss = self._forward(anchor, positive_text, negative_text)
-        vision_loss = self._forward(anchor, positive_vision, negative_vision)
-        return text_loss + vision_loss / 2
+        projection_loss = self._forward(anchor, positive)
+        reference_anchor_loss = self._forward(anchor, reference_anchor)
+        reference_positive_text_loss = self._forward(positive, reference_positive_text)
+        reference_positive_vision_loss = self._forward(
+            positive, reference_positive_vision
+        )
+
+        loss = (
+            2 * projection_loss
+            + reference_anchor_loss
+            + reference_positive_text_loss
+            + reference_positive_vision_loss
+        ) / 5
+        return loss

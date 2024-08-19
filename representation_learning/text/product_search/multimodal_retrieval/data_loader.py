@@ -13,7 +13,7 @@ from transformers import default_data_collator
 IMAGE_DATASET = "EmbeddingStudio/amazon-products-with-images"
 IMAGE_COLS = ["Product Name", "Raw Image"]
 TEXT_DATASET = "tasksource/esci"
-TEXT_COLS = ["query", "product_title"]
+TEXT_COLS = ["query", "product_title", "esci_label"]
 N_PROCESS = cpu_count() - 2
 
 
@@ -72,6 +72,7 @@ class Preprocessor:
         texts = load_dataset(
             TEXT_DATASET, columns=TEXT_COLS, num_proc=N_PROCESS, split="train"
         ).to_pandas()
+        texts = texts[texts["esci_label"].isin(["Exact"])]
         texts["product_title"] = texts["product_title"].apply(
             lambda x: str.lower(str.strip(x))
         )
