@@ -1,4 +1,3 @@
-
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 from constants import DIRECTORY
@@ -11,5 +10,3 @@ tokenizer = AutoTokenizer.from_pretrained(model_path)
 
 model.push_to_hub(dest_model_name, ignore_metadata_errors=True)
 tokenizer.push_to_hub(dest_model_name, ignore_metadata_errors=True)
-    
-    

@@ -10,11 +10,11 @@ from metrics import compute_metrics
 
 
 @click.command()
-@click.option("--batch_size", default=16, help="Batch size")
+@click.option("--batch_size", default=32, help="Batch size")
 @click.option("--sample_size", default=None, help="Sample size")
 @click.option("--embedding_dim", default=768, help="Embedding dimension")
 @click.option("--output_dir", default="outputs", help="Output directory")
-@click.option("--accumulation_steps", default=4, help="Accumulation steps")
+@click.option("--accumulation_steps", default=10, help="Accumulation steps")
 @click.option("--log_steps", default=10, help="Log steps")
 def main(
     batch_size, sample_size, embedding_dim, output_dir, accumulation_steps, log_steps
@@ -30,8 +30,8 @@ def main(
     train_dataloader = dataloader.run()
     model = ThreeTowerRetrievalModel(text_model_name, vision_model_name, embedding_dim)
     criterion = MultipleNegativesSymmetricRankingLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
-    n_epochs = 3
+    optimizer = torch.optim.AdamW(model.parameters(), lr=5e-6)
+    n_epochs = 10
     n_steps = n_epochs * len(train_dataloader)
     scheduler = get_scheduler(
         "linear",

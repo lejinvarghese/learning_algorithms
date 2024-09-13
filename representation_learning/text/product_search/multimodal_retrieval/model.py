@@ -10,19 +10,18 @@ from data_loader import Preprocessor
 
 
 class ProjectionHead(nn.Module):
-    def __init__(self, input_dim=768, output_dim=768, n_layers=1, dropout=0.1):
+    def __init__(self, input_dim=768, output_dim=768, n_layers=2, dropout=0.2):
         super().__init__()
 
         blocks = [
             nn.Linear(input_dim, output_dim),
             nn.GELU(),
-            nn.BatchNorm1d(output_dim),
+            # nn.BatchNorm1d(output_dim),
             nn.Dropout(dropout),
         ]
         layers = []
         for _ in range(n_layers):
             layers.extend(blocks)
-        blocks.pop(1)
         layers.extend(
             [
                 nn.Linear(output_dim, output_dim),

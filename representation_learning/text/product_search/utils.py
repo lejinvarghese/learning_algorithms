@@ -2,15 +2,21 @@ from typing import List, Dict
 from tqdm import tqdm
 
 from pandas import DataFrame
-from sentence_transformers import  InputExample
+from sentence_transformers import InputExample
+
 
 def get_document(row: Dict) -> str:
-    return str({"title": row.get("product_title"), 
-                        "description": row.get("product_description"), 
-                        "brand": row.get("product_brand"), 
-                        "color": row.get("product_color")})
+    return str(
+        {
+            "title": row.get("product_title"),
+            "description": row.get("product_description"),
+            "brand": row.get("product_brand"),
+            "color": row.get("product_color"),
+        }
+    )
 
-def get_pairs(data: DataFrame, split: str="training") -> List[InputExample]:
+
+def get_pairs(data: DataFrame, split: str = "training") -> List[InputExample]:
     examples = []
     for _, row in tqdm(
         data.iterrows(),
@@ -26,7 +32,8 @@ def get_pairs(data: DataFrame, split: str="training") -> List[InputExample]:
         )
     return examples
 
-def get_triplets(data: DataFrame, split: str="training") -> Dict[int, Dict]:
+
+def get_triplets(data: DataFrame, split: str = "training") -> Dict[int, Dict]:
     triplets, anchors = {}, {}
     for _, row in tqdm(
         data.iterrows(),

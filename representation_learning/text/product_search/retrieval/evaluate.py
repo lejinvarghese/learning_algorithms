@@ -18,7 +18,9 @@ models = [
 
 
 @click.command()
-@click.option("--n_samples", default=10_000, help="Number of samples to use for training")
+@click.option(
+    "--n_samples", default=10_000, help="Number of samples to use for training"
+)
 @click.option("--k", default=10, help="k for information retrieval evaluation")
 def main(n_samples, k):
     dataloader = DataLoader()
@@ -49,7 +51,9 @@ def main(n_samples, k):
         map_at_k=[k],
         main_score_function=SimilarityFunction.COSINE,
     )
-    seq_evaluator = SequentialEvaluator([triplets_evaluator, similarity_evaluator, ir_evaluator])
+    seq_evaluator = SequentialEvaluator(
+        [triplets_evaluator, similarity_evaluator, ir_evaluator]
+    )
 
     for m in models:
         model = SentenceTransformer(m, trust_remote_code=True)

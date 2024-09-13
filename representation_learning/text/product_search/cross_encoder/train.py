@@ -18,6 +18,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 now = datetime.now().strftime("%Y%m%d%H%M%S")
 
+
 class Trainer:
     def __init__(
         self,
@@ -38,14 +39,14 @@ class Trainer:
         self.writer = SummaryWriter(log_dir=f"{DIRECTORY}/logs/{now}")
         self.train_dataloader = self._get_dataloader()
         self.evaluator = self._get_evaluator()
-        self.global_step = 0 
+        self.global_step = 0
 
         logger.info(f"Using device: {self.device}")
-        
+
     def train(self):
         self.compile()
         self.fit()
-    
+
     def compile(self):
         self.model = CrossEncoder(
             self.model_name,
@@ -54,7 +55,7 @@ class Trainer:
             default_activation_function=torch.nn.Identity(),
             device=self.device,
         )
-    
+
     def fit(self):
         loss = torch.nn.CrossEntropyLoss()
         self.model.fit(
@@ -71,7 +72,7 @@ class Trainer:
             callback=self._callback,
         )
         self.model.save(f"{DIRECTORY}/models/{self.model_name}")
-    
+
     def _callback(self, score, epoch, steps):
         self.global_step += steps
         self.writer.add_scalar("score", score, self.global_step)

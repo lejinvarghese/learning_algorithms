@@ -26,7 +26,9 @@ k = 10
 
 
 @click.command()
-@click.option("--n_samples", default=10_000, help="Number of samples to use for training")
+@click.option(
+    "--n_samples", default=10_000, help="Number of samples to use for training"
+)
 def main(n_samples):
     model = SentenceTransformer(MODEL_NAME, trust_remote_code=True)
     dataloader = DataLoader()
@@ -34,8 +36,12 @@ def main(n_samples):
         dataloader.generate_positives(split="train", n_samples=n_samples),
         dataloader.generate_positives(split="test", n_samples=n_samples // 100),
     )
-    valid_triplets_dataset = dataloader.generate_triplets(split="test", n_samples=n_samples // 100)
-    valid_pairs_dataset = dataloader.generate_pairs(split="test", n_samples=n_samples // 100)
+    valid_triplets_dataset = dataloader.generate_triplets(
+        split="test", n_samples=n_samples // 100
+    )
+    valid_pairs_dataset = dataloader.generate_pairs(
+        split="test", n_samples=n_samples // 100
+    )
 
     queries, corpus, qrels = dataloader.generate_ir_datasets()
 
@@ -70,7 +76,9 @@ def main(n_samples):
         map_at_k=[k],
         main_score_function=SimilarityFunction.COSINE,
     )
-    seq_evaluator = SequentialEvaluator([triplets_evaluator, similarity_evaluator, ir_evaluator])
+    seq_evaluator = SequentialEvaluator(
+        [triplets_evaluator, similarity_evaluator, ir_evaluator]
+    )
 
     args = SentenceTransformerTrainingArguments(
         output_dir="models/nomic-embed-text-pretrain-esci",
@@ -113,7 +121,9 @@ def main(n_samples):
         evaluator=seq_evaluator,
         loss=losses,
         callbacks=[
-            EarlyStoppingCallback(early_stopping_patience=3, early_stopping_threshold=0.001),
+            EarlyStoppingCallback(
+                early_stopping_patience=3, early_stopping_threshold=0.001
+            ),
         ],
         compute_metrics=seq_evaluator,
         args=args,

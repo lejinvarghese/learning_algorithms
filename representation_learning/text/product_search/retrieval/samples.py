@@ -37,8 +37,16 @@ def main():
         results[m] = model.similarity(embeddings, embeddings)
         click.secho(f"Model: {m}", fg="green")
         click.secho(results[m], fg="yellow")
-    df = pd.concat({m: pd.DataFrame(results[m].tolist(), columns=sentences, index=sentences) for m in results}, axis=1)
-    df = df.reset_index().melt(id_vars="index", var_name=["model", "sentence2"], value_name="similarity")
+    df = pd.concat(
+        {
+            m: pd.DataFrame(results[m].tolist(), columns=sentences, index=sentences)
+            for m in results
+        },
+        axis=1,
+    )
+    df = df.reset_index().melt(
+        id_vars="index", var_name=["model", "sentence2"], value_name="similarity"
+    )
 
     df.rename(columns={"index": "sentence1"}, inplace=True)
     df.sort_values(by=["model", "similarity"], ascending=False, inplace=True)

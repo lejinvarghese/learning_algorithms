@@ -38,16 +38,16 @@ class MultipleNegativesSymmetricRankingLoss(nn.Module):
         negative_vision=None,
     ):
         projection_loss = self._forward(anchor, positive)
-        reference_anchor_loss = self._forward(anchor, reference_anchor)
+        reference_anchor_loss = self._forward(anchor, reference_positive_text)
         reference_positive_text_loss = self._forward(positive, reference_positive_text)
         reference_positive_vision_loss = self._forward(
             positive, reference_positive_vision
         )
 
         loss = (
-            2 * projection_loss
+            projection_loss
             + reference_anchor_loss
             + reference_positive_text_loss
             + reference_positive_vision_loss
-        ) / 5
+        ) / 2
         return loss
