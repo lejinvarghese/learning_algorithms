@@ -28,9 +28,7 @@ class_names = {v: k for k, v in class_names.items()}
 def main(model_id, n_epochs, batch_size):
     ## Load dataset and tokenizer
     run_id = f'{datetime.now().strftime("%Y%m%d%H%M%S")}_{model_id}'
-    dataset = load_dataset(
-        "dair-ai/emotion", "unsplit", split="train", columns=["text", "label"]
-    )
+    dataset = load_dataset("dair-ai/emotion", "unsplit", split="train", columns=["text", "label"])
     dataset = dataset.train_test_split(test_size=0.2, seed=42)
 
     unique_labels = list(set(dataset["train"]["label"]))
@@ -62,9 +60,7 @@ def main(model_id, n_epochs, batch_size):
 
     ## Load model
     accelerator = Accelerator()
-    model = AutoModelForSequenceClassification.from_pretrained(
-        model_id, num_labels=n_classes
-    )
+    model = AutoModelForSequenceClassification.from_pretrained(model_id, num_labels=n_classes)
 
     # DeepSpeed configuration
     ds_config = {
@@ -105,15 +101,13 @@ def main(model_id, n_epochs, batch_size):
         },
     }
 
-    model, _, _, _ = deepspeed.initialize(
-        model=model, config=ds_config, model_parameters=model.parameters()
-    )
+    model, _, _, _ = deepspeed.initialize(model=model, config=ds_config, model_parameters=model.parameters())
     train_dataloader = accelerator.prepare(train_dataloader)
     test_dataloader = accelerator.prepare(test_dataloader)
     writer = SummaryWriter(log_dir=f"logs/{run_id}")
     # Training loop
-    model.train()
     for epoch in range(n_epochs):
+        model.train()
         progress_bar = tqdm(
             train_dataloader,
             desc=f"Epoch {epoch}",
@@ -131,14 +125,10 @@ def main(model_id, n_epochs, batch_size):
             model.backward(loss)
             model.step()
             progress_bar.set_description(f"Epoch {epoch} | Loss: {total_loss:.4f}")
-            writer.add_scalar(
-                "Loss/train", loss.item(), epoch * len(train_dataloader) + step
-            )
+            writer.add_scalar("Loss/train", loss.item(), epoch * len(train_dataloader) + step)
 
         if accelerator.is_local_main_process:
-            click.secho(
-                f"Epoch {epoch} completed | Final loss: {total_loss:.4f}", fg="yellow"
-            )
+            click.secho(f"Epoch {epoch} completed | Final loss: {total_loss:.4f}", fg="yellow")
             writer.add_scalar("Loss/epoch", total_loss, epoch)
 
             if epoch % 5 == 0:
@@ -147,38 +137,33 @@ def main(model_id, n_epochs, batch_size):
                 model.save_checkpoint(model_path)
                 click.secho(f"Saved checkpoint to {model_path}", fg="blue")
 
-        # qualitative evaluation on sample sentences
+        ## evaluate
+        ## qualitative evaluation on sample sentences
+        model.eval()
         sample_texts = ["i'm a happy camper", "this is so frustrating", "im alright"]
-        encodings = tokenizer(
-            sample_texts, padding=True, truncation=True, return_tensors="pt"
-        ).to(model.device)
+        encodings = tokenizer(sample_texts, padding=True, truncation=True, return_tensors="pt").to(model.device)
         with torch.no_grad():
             outputs = model(**encodings)
         predictions = torch.argmax(outputs.logits, dim=-1).cpu().numpy()
         predictions = [class_names[p] for p in predictions]
-        click.secho(
-            f"Sample Predictions: {list(zip(sample_texts, predictions))}", fg="magenta"
-        )
+        click.secho(f"Sample Predictions: {list(zip(sample_texts, predictions))}", fg="magenta")
 
-    ## evaluate
-    model.eval()
-    all_preds, all_labels = [], []
-    with torch.no_grad():
-        for batch in tqdm(test_dataloader, desc="Evaluating", colour="blue"):
-            input_ids, attention_mask, labels = batch
-            outputs = model(input_ids, attention_mask=attention_mask)
-            preds = torch.argmax(outputs.logits, dim=-1)
-            all_preds.extend(preds.cpu().numpy())
-            all_labels.extend(labels.cpu().numpy())
+        ## quantitative evaluation on sample sentences
+        all_preds, all_labels = [], []
+        with torch.no_grad():
+            for batch in tqdm(test_dataloader, desc="Evaluating", colour="blue"):
+                input_ids, attention_mask, labels = batch
+                outputs = model(input_ids, attention_mask=attention_mask)
+                preds = torch.argmax(outputs.logits, dim=-1)
+                all_preds.extend(preds.cpu().numpy())
+                all_labels.extend(labels.cpu().numpy())
 
-    accuracy = accuracy_score(all_labels, all_preds)
-    precision, recall, f1, _ = precision_recall_fscore_support(
-        all_labels, all_preds, average="weighted"
-    )
-    writer.add_scalar("Accuracy/test", accuracy, 0)
-    writer.add_scalar("Precision/test", precision, 0)
-    writer.add_scalar("Recall/test", recall, 0)
-    writer.add_scalar("F1/test", f1, 0)
+        accuracy = accuracy_score(all_labels, all_preds)
+        precision, recall, f1, _ = precision_recall_fscore_support(all_labels, all_preds, average="weighted")
+        writer.add_scalar("Accuracy/test", accuracy, 0)
+        writer.add_scalar("Precision/test", precision, 0)
+        writer.add_scalar("Recall/test", recall, 0)
+        writer.add_scalar("F1/test", f1, 0)
 
     if accelerator.is_local_main_process:
         model_path = f"models/{run_id}/final_model"
