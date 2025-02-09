@@ -1,11 +1,17 @@
 import torch
+from datetime import datetime
 import click
 from tqdm import tqdm
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
-from datasets import load_dataset
+from datasets import load_dataset, ClassLabel
 from torch.utils.data import DataLoader
 from accelerate import Accelerator
 import deepspeed
+
+def to_lowercase(examples):
+    examples["query"] = [q.lower() for q in examples["query"]]
+    examples["title"] = [s.lower() for s in examples["title"]]
+    return examples
 
 
 @click.command()
@@ -14,20 +20,27 @@ import deepspeed
 @click.option("--batch_size", default=16, help="Batch size")
 def main(model_id, n_epochs, batch_size):
     ## Load dataset and tokenizer
-    dataset = load_dataset("glue", "sst2", split="train[:1%]")
+    run_id = f'{datetime.now().strftime("%Y%m%d%H%M%S")}_{model_id}'
+    dataset = load_dataset("dair-ai/emotion", "unsplit", split="train", columns=["text", "label"])
+    dataset = dataset.map(to_lowercase, batched=True, num_proc=12)
+    unique_labels = list(set(dataset["query"]))
+    n_classes = len(unique_labels)
+    labels = ClassLabel(names=unique_labels)
+    dataset = dataset.cast_column("query", ClassLabel(names=labels))
+
     tokenizer = AutoTokenizer.from_pretrained(model_id)
 
     def collate_fn(batch):
-        texts = [x["sentence"] for x in batch]
-        labels = torch.tensor([x["label"] for x in batch])
+        texts = [x["title"] for x in batch]
+        labels = torch.tensor([x["query"] for x in batch])
         encodings = tokenizer(texts, padding=True, truncation=True, return_tensors="pt")
         return encodings.input_ids, encodings.attention_mask, labels
 
-    dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn)
+    dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn, num_workers=12, pin_memory=True, shuffle=True)
 
     ## Load model
     accelerator = Accelerator()
-    model = AutoModelForSequenceClassification.from_pretrained(model_id, num_labels=2)
+    model = AutoModelForSequenceClassification.from_pretrained(model_id, num_labels=n_classes)
 
     # DeepSpeed configuration
     ds_config = {
@@ -68,9 +81,7 @@ def main(model_id, n_epochs, batch_size):
         },
     }
 
-    model, _, _, _ = deepspeed.initialize(
-        model=model, config=ds_config, model_parameters=model.parameters()
-    )
+    model, _, _, _ = deepspeed.initialize(model=model, config=ds_config, model_parameters=model.parameters())
     dataloader = accelerator.prepare(dataloader)
 
     # Training loop
@@ -94,14 +105,23 @@ def main(model_id, n_epochs, batch_size):
             model.step()
             progress_bar.set_description(f"Epoch {epoch} | Loss: {total_loss:.4f}")
 
-        # Print epoch summary only on main process
         if accelerator.is_local_main_process:
-            click.secho(
-                f"Epoch {epoch} completed | Final loss: {total_loss:.4f}", fg="yellow"
-            )
+            click.secho(f"Epoch {epoch} completed | Final loss: {total_loss:.4f}", fg="yellow")
+            if epoch % 5 == 0:
+                model_path = f"models/{run_id}/checkpoint_{epoch}"
+                model.save_checkpoint(model_path)
+                click.secho(f"Saved checkpoint to {model_path}", fg="blue")
 
     if accelerator.is_local_main_process:
-        click.secho("Training complete!", fg="green")
+        model_path = f"models/{run_id}/final_model"
+        model.module.save_pretrained(
+            model_path,
+            save_config=True,
+            safe_serialization=True,
+        )
+        tokenizer.save_pretrained("final_model")
+
+        click.secho("Training complete and model saved!", fg="green")
 
 
 if __name__ == "__main__":
