@@ -85,7 +85,9 @@ if __name__ == "__main__":
     # Model & Tokenizer
     ################
     torch_dtype = (
-        model_args.torch_dtype if model_args.torch_dtype in ["auto", None] else getattr(torch, model_args.torch_dtype)
+        model_args.torch_dtype
+        if model_args.torch_dtype in ["auto", None]
+        else getattr(torch, model_args.torch_dtype)
     )
     quantization_config = get_quantization_config(model_args)
     model_kwargs = dict(
@@ -97,17 +99,23 @@ if __name__ == "__main__":
     )
 
     tokenizer = AutoTokenizer.from_pretrained(
-        model_args.model_name_or_path, padding_side="left", trust_remote_code=model_args.trust_remote_code
+        model_args.model_name_or_path,
+        padding_side="left",
+        trust_remote_code=model_args.trust_remote_code,
     )
     tokenizer.add_special_tokens({"pad_token": "[PAD]"})
     device = "cpu"
     if tokenizer.chat_template is None:
         tokenizer.chat_template = SIMPLE_CHAT_TEMPLATE
     value_model = AutoModelForSequenceClassification.from_pretrained(
-        training_args.reward_model_path, trust_remote_code=model_args.trust_remote_code, num_labels=1
+        training_args.reward_model_path,
+        trust_remote_code=model_args.trust_remote_code,
+        num_labels=1,
     ).to(device)
     reward_model = AutoModelForSequenceClassification.from_pretrained(
-        training_args.reward_model_path, trust_remote_code=model_args.trust_remote_code, num_labels=1
+        training_args.reward_model_path,
+        trust_remote_code=model_args.trust_remote_code,
+        num_labels=1,
     ).to(device)
     policy = AutoModelForCausalLM.from_pretrained(
         training_args.sft_model_path, trust_remote_code=model_args.trust_remote_code
@@ -125,7 +133,9 @@ if __name__ == "__main__":
     # Dataset
     ################
     dataset = load_dataset(
-        script_args.dataset_name, name=script_args.dataset_config, split=script_args.dataset_train_split
+        script_args.dataset_name,
+        name=script_args.dataset_config,
+        split=script_args.dataset_train_split,
     )
     eval_samples = 100
     train_dataset = dataset.select(range(len(dataset) - eval_samples))

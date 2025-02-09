@@ -42,18 +42,36 @@ ds_config = {
         "hysteresis": 2,
         "min_loss_scale": 1,
     },
-    "optimizer": {"type": "AdamW", "params": {"lr": 5e-5, "betas": [0.9, 0.999], "eps": 1e-8, "weight_decay": 0.01}},
-    "scheduler": {"type": "WarmupLR", "params": {"warmup_min_lr": 0, "warmup_max_lr": 5e-5, "warmup_num_steps": 50}},
+    "optimizer": {
+        "type": "AdamW",
+        "params": {
+            "lr": 5e-5,
+            "betas": [0.9, 0.999],
+            "eps": 1e-8,
+            "weight_decay": 0.01,
+        },
+    },
+    "scheduler": {
+        "type": "WarmupLR",
+        "params": {"warmup_min_lr": 0, "warmup_max_lr": 5e-5, "warmup_num_steps": 50},
+    },
 }
 
 
-model, optimizer, _, _ = deepspeed.initialize(model=model, config=ds_config, model_parameters=model.parameters())
+model, optimizer, _, _ = deepspeed.initialize(
+    model=model, config=ds_config, model_parameters=model.parameters()
+)
 dataloader = accelerator.prepare(dataloader)
 
 # Training loop
 model.train()
 for epoch in range(10):
-    progress_bar = tqdm(dataloader, desc=f"Epoch {epoch}", disable=not accelerator.is_local_main_process, colour="green")
+    progress_bar = tqdm(
+        dataloader,
+        desc=f"Epoch {epoch}",
+        disable=not accelerator.is_local_main_process,
+        colour="green",
+    )
 
     total_loss = 0.0
     for batch_idx, batch in enumerate(progress_bar):
@@ -68,7 +86,9 @@ for epoch in range(10):
 
     # Print epoch summary only on main process
     if accelerator.is_local_main_process:
-        click.secho(f"Epoch {epoch} completed | Final loss: {total_loss:.4f}", fg="yellow")
+        click.secho(
+            f"Epoch {epoch} completed | Final loss: {total_loss:.4f}", fg="yellow"
+        )
 
 if accelerator.is_local_main_process:
     click.secho("Training complete!", fg="green")
