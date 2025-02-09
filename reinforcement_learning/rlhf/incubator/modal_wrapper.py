@@ -6,6 +6,7 @@ image = modal.Image.debian_slim(python_version="3.10").run_commands(
 )
 app = modal.App("example-get-started")
 
+
 def func(x):
     click.secho("This code is running on a remote worker!", fg="magenta")
     return x**2
