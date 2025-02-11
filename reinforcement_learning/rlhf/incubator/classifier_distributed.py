@@ -85,7 +85,7 @@ def main(model_id, n_epochs, batch_size):
         "optimizer": {
             "type": "AdamW",
             "params": {
-                "lr": 5e-5,
+                "lr": 1e-5,
                 "betas": [0.9, 0.999],
                 "eps": 1e-8,
                 "weight_decay": 0.01,
@@ -95,7 +95,7 @@ def main(model_id, n_epochs, batch_size):
             "type": "WarmupLR",
             "params": {
                 "warmup_min_lr": 0,
-                "warmup_max_lr": 5e-5,
+                "warmup_max_lr": 1e-5,
                 "warmup_num_steps": 50,
             },
         },
