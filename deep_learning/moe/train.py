@@ -2,6 +2,7 @@ from tqdm import tqdm
 import random
 import click
 from datetime import datetime
+import torch.nn.functional as F
 
 
 import torch
@@ -97,39 +98,60 @@ class SentenceTripletDataset(Dataset):
 
 # Expert class using pre-trained BERT
 class EmbeddingExpert(nn.Module):
-    def __init__(self, model_name, output_dim):
+    def __init__(self, model_name, output_dim, dropout_rate=0.1):
         super().__init__()
-        self.bert = AutoModel.from_pretrained(model_name)
-        # Freeze BERT parameters for efficiency (optional)
-        for param in self.bert.parameters():
+        self.base = AutoModel.from_pretrained(model_name)
+        self.layer_norm = nn.LayerNorm(self.base.config.hidden_size)
+        self.dropout = nn.Dropout(dropout_rate)
+        for param in self.base.parameters():
             param.requires_grad = False
 
         # Projection layer to get the final embedding
-        self.projection = nn.Linear(self.bert.config.hidden_size, output_dim)
+        self.projection = nn.Linear(self.base.config.hidden_size, output_dim)
+        nn.init.xavier_uniform_(self.projection.weight)
+        nn.init.zeros_(self.projection.bias)
+        
+    def mean_pooling(self, model_output, attention_mask):
+        # Mean pooling - take attention mask into account for averaging
+        token_embeddings = model_output.last_hidden_state
+        input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+        return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
 
     def forward(self, input_ids, attention_mask):
-        # Get BERT output (last hidden state)
-        outputs = self.bert(input_ids=input_ids, attention_mask=attention_mask)
-        # Use the [CLS] token embedding as sentence representation
-        cls_embedding = outputs.last_hidden_state[:, 0, :]
-        # Project to desired dimension
-        embedding = self.projection(cls_embedding)
+        outputs = self.base(input_ids=input_ids, attention_mask=attention_mask)
+        pooled_output = self.mean_pooling(outputs, attention_mask)
+        pooled_output = self.layer_norm(pooled_output)
+        pooled_output = self.dropout(pooled_output)
+        embedding = self.projection(pooled_output)
+        embedding = F.normalize(embedding, p=2, dim=1)
+        
         return embedding
 
 
 # Gating Network
 class GatingNetwork(nn.Module):
-    def __init__(self, input_dim, hidden_dim, num_experts):
+    def __init__(self, input_dim, hidden_dim, num_experts, dropout_rate=0.1):
         super().__init__()
+        self.layer_norm = nn.LayerNorm(input_dim)
+        self.dropout = nn.Dropout(dropout_rate)
         self.linear1 = nn.Linear(input_dim, hidden_dim)
         self.relu = nn.ReLU()
         self.linear2 = nn.Linear(hidden_dim, num_experts)
         self.softmax = nn.Softmax(dim=-1)
+        
+        nn.init.xavier_uniform_(self.linear1.weight)
+        nn.init.zeros_(self.linear1.bias)
+        nn.init.xavier_uniform_(self.linear2.weight)
+        nn.init.zeros_(self.linear2.bias)
 
     def forward(self, x):
+        x = self.layer_norm(x)
+        x = self.dropout(x)
+        
         x = self.linear1(x)
         x = self.relu(x)
         x = self.linear2(x)
+        x = torch.clamp(x, min=-10, max=10)
         x = self.softmax(x)
         return x
 
@@ -184,6 +206,19 @@ class TripletLoss(nn.Module):
         losses = torch.relu(distance_positive - distance_negative + self.margin)
         return losses.mean()
 
+def get_embeddings(model, batch, device):
+    anchor_input_ids = batch["anchor_input_ids"].to(device)
+    anchor_attention_mask = batch["anchor_attention_mask"].to(device)
+    positive_input_ids = batch["positive_input_ids"].to(device)
+    positive_attention_mask = batch["positive_attention_mask"].to(device)
+    negative_input_ids = batch["negative_input_ids"].to(device)
+    negative_attention_mask = batch["negative_attention_mask"].to(device)
+
+    # Get embeddings for all three sentences
+    anchor_embedding = model(anchor_input_ids, anchor_attention_mask)
+    positive_embedding = model(positive_input_ids, positive_attention_mask)
+    negative_embedding = model(negative_input_ids, negative_attention_mask)
+    return anchor_embedding, positive_embedding, negative_embedding
 
 def train_model(
     model, train_loader, criterion, optimizer, scheduler, device, num_epochs=5
@@ -194,20 +229,10 @@ def train_model(
 
         for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}"):
             # Move all inputs to device
-            anchor_input_ids = batch["anchor_input_ids"].to(device)
-            anchor_attention_mask = batch["anchor_attention_mask"].to(device)
-            positive_input_ids = batch["positive_input_ids"].to(device)
-            positive_attention_mask = batch["positive_attention_mask"].to(device)
-            negative_input_ids = batch["negative_input_ids"].to(device)
-            negative_attention_mask = batch["negative_attention_mask"].to(device)
-
-            # Get embeddings for all three sentences
-            anchor_embedding = model(anchor_input_ids, anchor_attention_mask)
-            positive_embedding = model(positive_input_ids, positive_attention_mask)
-            negative_embedding = model(negative_input_ids, negative_attention_mask)
+            anchor, positive, negative = get_embeddings(model, batch, device)
 
             # Compute loss
-            loss = criterion(anchor_embedding, positive_embedding, negative_embedding)
+            loss = criterion(anchor, positive, negative)
 
             # Backward pass and optimization
             optimizer.zero_grad()
@@ -232,25 +257,15 @@ def evaluate_model(model, test_loader, device):
     with torch.no_grad():
         for batch in tqdm(test_loader, desc="Evaluating"):
             # Move all inputs to device
-            anchor_input_ids = batch["anchor_input_ids"].to(device)
-            anchor_attention_mask = batch["anchor_attention_mask"].to(device)
-            positive_input_ids = batch["positive_input_ids"].to(device)
-            positive_attention_mask = batch["positive_attention_mask"].to(device)
-            negative_input_ids = batch["negative_input_ids"].to(device)
-            negative_attention_mask = batch["negative_attention_mask"].to(device)
-
-            # Get embeddings
-            anchor_embedding = model(anchor_input_ids, anchor_attention_mask)
-            positive_embedding = model(positive_input_ids, positive_attention_mask)
-            negative_embedding = model(negative_input_ids, negative_attention_mask)
+            anchor, positive, negative = get_embeddings(model, batch, device)
 
             # Calculate distances
-            positive_distance = (anchor_embedding - positive_embedding).pow(2).sum(1)
-            negative_distance = (anchor_embedding - negative_embedding).pow(2).sum(1)
+            positive_distance = (anchor - positive).pow(2).sum(1)
+            negative_distance = (anchor - negative).pow(2).sum(1)
 
             # Check if positive is closer than negative
             correct += (positive_distance < negative_distance).sum().item()
-            total += anchor_embedding.size(0)
+            total += anchor.size(0)
 
     accuracy = correct / total
     click.secho(f"Evaluation Accuracy: {accuracy:.4f}", fg="green")
@@ -258,11 +273,11 @@ def evaluate_model(model, test_loader, device):
 
 
 @click.command()
-@click.option("--n_epochs", default=10, help="Number of epochs to train the model")
+@click.option("--n_epochs", default=1, help="Number of epochs to train the model")
 @click.option(
     "--output_dim", default=256, help="Output dimension of the sentence embeddings"
 )
-@click.option("--batch_size", default=32, help="Batch size for training")
+@click.option("--batch_size", default=512, help="Batch size for training")
 @click.option("--n_experts", default=2, help="Number of experts in the MoE model")
 @click.option("--model_name", default="bert-base-uncased", help="Model name")
 def main(n_epochs, output_dim, batch_size, n_experts, model_name):
@@ -312,7 +327,7 @@ def main(n_epochs, output_dim, batch_size, n_experts, model_name):
     # Train the model
     click.secho("Starting training.", fg="yellow")
     model = train_model(
-        model, train_loader, criterion, optimizer, device, num_epochs=n_epochs
+        model, train_loader, criterion, optimizer, scheduler, device, num_epochs=n_epochs
     )
 
     # Evaluate the model
