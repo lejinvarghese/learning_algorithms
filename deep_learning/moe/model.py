@@ -5,7 +5,7 @@ from transformers import PreTrainedModel, PretrainedConfig, AutoModel
 
 class EmbeddingMoEConfig(PretrainedConfig):
     model_type = "embedding_moe"
-    def __init__(self, output_dim=128, num_experts=2, dropout_rate=0.1, **kwargs):
+    def __init__(self, output_dim=256, num_experts=2, dropout_rate=0.1, **kwargs):
         super().__init__(**kwargs)
         self.output_dim = output_dim
         self.num_experts = num_experts
@@ -87,7 +87,7 @@ class EmbeddingMoE(PreTrainedModel):
 
         self.expert1 = EmbeddingExpert("bert-base-uncased", output_dim)
         self.expert2 = EmbeddingExpert("bert-base-uncased", output_dim)
-        self.gating = GatingNetwork(output_dim, 256, num_experts)
+        self.gating = GatingNetwork(output_dim * 2, 256, num_experts)
 
     def forward(self, input_ids, attention_mask):
         # Get embeddings from both experts
@@ -95,7 +95,7 @@ class EmbeddingMoE(PreTrainedModel):
         expert2_output = self.expert2(input_ids, attention_mask)
 
         # Average the output as input to gating
-        gating_input = (expert1_output + expert2_output) / 2
+        gating_input = torch.cat([expert1_output, expert2_output], dim=1)
 
         # Get gating weights
         gating_output = self.gating(gating_input)

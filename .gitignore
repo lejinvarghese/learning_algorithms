@@ -133,3 +133,4 @@ dmypy.json
 # custom
 *data/
 representation_learning/text/product_search/retrieval/models/
+models/
