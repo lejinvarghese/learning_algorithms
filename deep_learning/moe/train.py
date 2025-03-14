@@ -1,6 +1,7 @@
 from tqdm import tqdm
 import random
 import click
+import os
 from datetime import datetime
 
 import torch
@@ -10,8 +11,9 @@ from torch.utils.data import Dataset, DataLoader
 from datasets import load_dataset
 from transformers import AutoTokenizer
 
-from model import EmbeddingMoE
+from model import EmbeddingMoE, EmbeddingMoEConfig
 
+torch.cuda.empty_cache()
 
 model_version = datetime.now().strftime("%Y%m%d%H%M%S")
 
@@ -46,7 +48,7 @@ class SentenceTripletDataset(Dataset):
         ]  # 2 is contradiction in SNLI
 
         # Create triplets (anchor, positive, negative)
-        for premise, hypothesis in entailment_pairs[:10000]:  # Limit for memory reasons
+        for premise, hypothesis in entailment_pairs[:10_000_000]:  # Limit for memory reasons
             # The anchor is the premise
             anchor = premise
             # The positive is the entailed hypothesis
@@ -178,14 +180,11 @@ def evaluate_model(model, test_loader, device):
 
 
 @click.command()
-@click.option("--n_epochs", default=1, help="Number of epochs to train the model")
-@click.option(
-    "--output_dim", default=256, help="Output dimension of the sentence embeddings"
-)
+@click.option("--n_epochs", default=10, help="Number of epochs to train the model")
 @click.option("--batch_size", default=512, help="Batch size for training")
 @click.option("--n_experts", default=2, help="Number of experts in the MoE model")
-@click.option("--model_name", default="bert-base-uncased", help="Model name")
-def main(n_epochs, output_dim, batch_size, n_experts, model_name):
+@click.option("--model_name", default="thenlper/gte-small", help="Model name")
+def main(n_epochs, batch_size, n_experts, model_name):
     # Set device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     click.secho(f"Using device: {device}", fg="blue")
@@ -207,7 +206,8 @@ def main(n_epochs, output_dim, batch_size, n_experts, model_name):
     val_loader = DataLoader(val_dataset, batch_size=batch_size)
 
     # Initialize model
-    model = EmbeddingMoE(output_dim=output_dim, num_experts=n_experts)
+    config = EmbeddingMoEConfig()
+    model = EmbeddingMoE(config)
     model.to(device)
 
     # Initialize loss and optimizer
@@ -247,9 +247,11 @@ def main(n_epochs, output_dim, batch_size, n_experts, model_name):
 
     # Save the model
     file_path = (
-        f"models/{model_name.replace('-', '_')}_embedding_moe/{model_version}/pytorch_model.bin"
+        f"models/{model_name.replace('-', '_')}_embedding_moe/{model_version}"
     )
-    torch.save(model.state_dict(), file_path)
+    os.makedirs(file_path, exist_ok=True)
+    torch.save(model.state_dict(), f"{file_path}/pytorch_model.bin")
+    click.secho(f"Model saved at {file_path}", fg="green")
 
 
 if __name__ == "__main__":
