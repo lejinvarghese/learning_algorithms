@@ -3,4 +3,4 @@
 
 ### Results
  - bert-base-uncased: 0.9775
- - thenlper/gte-small: 0.9922
+ - thenlper/gte-small: val: 0.9922, test: 0.9664

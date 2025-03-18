@@ -1,14 +1,13 @@
 from tqdm import tqdm
-import random
 import click
 import os
 from datetime import datetime
 
 import torch
 from torch import nn
-from torch.utils.data import Dataset, DataLoader
+from dataloader import TripletDataLoader
+from sklearn.metrics import precision_score, recall_score, f1_score
 
-from datasets import load_dataset
 from transformers import AutoTokenizer
 
 from model import EmbeddingMoE, EmbeddingMoEConfig
@@ -16,87 +15,6 @@ from model import EmbeddingMoE, EmbeddingMoEConfig
 torch.cuda.empty_cache()
 
 model_version = datetime.now().strftime("%Y%m%d%H%M%S")
-
-
-# Load the SNLI dataset which contains premise, hypothesis pairs with labels
-def load_snli_dataset():
-    dataset = load_dataset("snli")
-    return dataset
-
-
-# Custom Dataset class for triplet learning
-class SentenceTripletDataset(Dataset):
-    def __init__(self, dataset, tokenizer, max_length=128):
-        self.tokenizer = tokenizer
-        self.max_length = max_length
-        self.triplets = []
-
-        # Filter out entries with 'neutral' labels and missing entries
-        filtered_data = [
-            (entry["premise"], entry["hypothesis"], entry["label"])
-            for entry in dataset
-            if entry["label"] != -1 and entry["premise"] and entry["hypothesis"]
-        ]
-
-        # Create triplets: (anchor, positive, negative)
-        # For each sentence pair with "entailment" label, find a negative example
-        entailment_pairs = [
-            (p, h) for p, h, label in filtered_data if label == 0
-        ]  # 0 is entailment in SNLI
-        contradiction_pairs = [
-            (p, h) for p, h, label in filtered_data if label == 2
-        ]  # 2 is contradiction in SNLI
-
-        # Create triplets (anchor, positive, negative)
-        for premise, hypothesis in entailment_pairs[:10_000_000]:  # Limit for memory reasons
-            # The anchor is the premise
-            anchor = premise
-            # The positive is the entailed hypothesis
-            positive = hypothesis
-            # Find a random contradiction as negative
-            if contradiction_pairs:
-                neg_premise, neg_hypothesis = random.choice(contradiction_pairs)
-                negative = neg_hypothesis
-                self.triplets.append((anchor, positive, negative))
-
-    def __len__(self):
-        return len(self.triplets)
-
-    def __getitem__(self, idx):
-        anchor, positive, negative = self.triplets[idx]
-
-        # Tokenize all three sentences
-        anchor_encoding = self.tokenizer(
-            anchor,
-            max_length=self.max_length,
-            padding="max_length",
-            truncation=True,
-            return_tensors="pt",
-        )
-        positive_encoding = self.tokenizer(
-            positive,
-            max_length=self.max_length,
-            padding="max_length",
-            truncation=True,
-            return_tensors="pt",
-        )
-        negative_encoding = self.tokenizer(
-            negative,
-            max_length=self.max_length,
-            padding="max_length",
-            truncation=True,
-            return_tensors="pt",
-        )
-
-        # Return tensors of input_ids, attention_mask
-        return {
-            "anchor_input_ids": anchor_encoding["input_ids"].squeeze(0),
-            "anchor_attention_mask": anchor_encoding["attention_mask"].squeeze(0),
-            "positive_input_ids": positive_encoding["input_ids"].squeeze(0),
-            "positive_attention_mask": positive_encoding["attention_mask"].squeeze(0),
-            "negative_input_ids": negative_encoding["input_ids"].squeeze(0),
-            "negative_attention_mask": negative_encoding["attention_mask"].squeeze(0),
-        }
 
 
 # Triplet loss for learning similarity
@@ -160,6 +78,8 @@ def evaluate_model(model, test_loader, device):
     model.eval()
     correct = 0
     total = 0
+    all_labels = []
+    all_preds = []
 
     with torch.no_grad():
         for batch in tqdm(test_loader, desc="Evaluating"):
@@ -170,13 +90,32 @@ def evaluate_model(model, test_loader, device):
             positive_distance = (anchor - positive).pow(2).sum(1)
             negative_distance = (anchor - negative).pow(2).sum(1)
 
-            # Check if positive is closer than negative
+            # Predictions and labels
+            preds = (positive_distance < negative_distance).int().cpu()
+            labels = torch.ones_like(
+                preds
+            )  # Assuming positive is always the correct class
+
+            all_preds.extend(preds.numpy())
+            all_labels.extend(labels.numpy())
+
             correct += (positive_distance < negative_distance).sum().item()
             total += anchor.size(0)
 
+    # Calculate metrics
     accuracy = correct / total
+    precision = precision_score(all_labels, all_preds, zero_division=0)
+    recall = recall_score(all_labels, all_preds, zero_division=0)
+    f1 = f1_score(all_labels, all_preds, zero_division=0)
+
+    # Print results
     click.secho(f"Evaluation Accuracy: {accuracy:.4f}", fg="green")
-    return accuracy
+    click.secho(
+        f"Precision: {precision:.4f}, Recall: {recall:.4f}, F1 Score: {f1:.4f}",
+        fg="blue",
+    )
+
+    return accuracy, precision, recall, f1
 
 
 @click.command()
@@ -191,19 +130,16 @@ def main(n_epochs, batch_size, n_experts, model_name):
 
     # Load dataset
     click.secho("Loading the dataset.", fg="yellow")
-    dataset = load_snli_dataset()
-
     # Initialize tokenizer (using BERT tokenizer)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     # Create train and validation datasets
     click.secho("Preparing triplet datasets.", fg="yellow")
-    train_dataset = SentenceTripletDataset(dataset["train"], tokenizer)
-    val_dataset = SentenceTripletDataset(dataset["validation"], tokenizer)
-
     # Create data loaders
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size)
+    train_loader, val_loader = (
+        TripletDataLoader(tokenizer, batch_size=batch_size, split="train")(),
+        TripletDataLoader(tokenizer, batch_size=batch_size, split="validation")(),
+    )
 
     # Initialize model
     config = EmbeddingMoEConfig()
@@ -214,14 +150,10 @@ def main(n_epochs, batch_size, n_experts, model_name):
     criterion = TripletLoss(margin=0.5)
 
     # Only optimize the projection layers and gating network
-    optimizer_params = (
-        list(model.expert1.projection.parameters())
-        + list(model.expert2.projection.parameters())
-        + list(model.gating.parameters())
-    )
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
 
     optimizer = torch.optim.AdamW(
-        model.parameters(), lr=1e-3, weight_decay=0.01, eps=1e-8
+        trainable_params, lr=1e-3, weight_decay=0.01, eps=1e-8
     )
 
     # Learning rate scheduler
@@ -246,9 +178,7 @@ def main(n_epochs, batch_size, n_experts, model_name):
     evaluate_model(model, val_loader, device)
 
     # Save the model
-    file_path = (
-        f"models/{model_name.replace('-', '_')}_embedding_moe/{model_version}"
-    )
+    file_path = f"models/{model_name.replace('-', '_')}_embedding_moe/{model_version}"
     os.makedirs(file_path, exist_ok=True)
     torch.save(model.state_dict(), f"{file_path}/pytorch_model.bin")
     click.secho(f"Model saved at {file_path}", fg="green")

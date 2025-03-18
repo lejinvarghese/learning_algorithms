@@ -3,8 +3,10 @@ from torch import nn
 import torch.nn.functional as F
 from transformers import PreTrainedModel, PretrainedConfig, AutoModel
 
+
 class EmbeddingMoEConfig(PretrainedConfig):
     model_type = "embedding_moe"
+
     def __init__(self, output_dim=256, num_experts=2, dropout_rate=0.1, **kwargs):
         super().__init__(**kwargs)
         self.output_dim = output_dim
