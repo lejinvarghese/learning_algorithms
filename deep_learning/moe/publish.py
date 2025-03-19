@@ -1,7 +1,8 @@
 from huggingface_hub import upload_folder, create_repo
 from transformers import AutoModel, AutoConfig
 import warnings
-warnings.filterwarnings("ignore", message=".*untrained layers.*")  
+
+warnings.filterwarnings("ignore", message=".*untrained layers.*")
 
 
 ## Upload model to the Hub
@@ -21,5 +22,12 @@ upload_folder(
 
 
 ## Load model from the Hub
-config = AutoConfig.from_pretrained("lv12/bert_base_uncased_embedding_moe", trust_remote_code=True)
-model = AutoModel.from_pretrained("lv12/bert_base_uncased_embedding_moe", config=config, trust_remote_code=True, ignore_mismatched_sizes=True)
+config = AutoConfig.from_pretrained(
+    "lv12/bert_base_uncased_embedding_moe", trust_remote_code=True
+)
+model = AutoModel.from_pretrained(
+    "lv12/bert_base_uncased_embedding_moe",
+    config=config,
+    trust_remote_code=True,
+    ignore_mismatched_sizes=True,
+)

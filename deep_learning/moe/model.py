@@ -7,8 +7,16 @@ from transformers import PreTrainedModel, PretrainedConfig, AutoModel
 class EmbeddingMoEConfig(PretrainedConfig):
     model_type = "embedding_moe"
 
-    def __init__(self, output_dim=256, num_experts=2, dropout_rate=0.1, **kwargs):
+    def __init__(
+        self,
+        model_name="bert-base-uncased",
+        output_dim=256,
+        num_experts=2,
+        dropout_rate=0.1,
+        **kwargs
+    ):
         super().__init__(**kwargs)
+        self.model_name = model_name
         self.output_dim = output_dim
         self.num_experts = num_experts
         self.dropout_rate = dropout_rate
@@ -87,8 +95,8 @@ class EmbeddingMoE(PreTrainedModel):
         output_dim = config.output_dim if hasattr(config, "output_dim") else 128
         num_experts = config.num_experts if hasattr(config, "num_experts") else 2
 
-        self.expert1 = EmbeddingExpert("bert-base-uncased", output_dim)
-        self.expert2 = EmbeddingExpert("bert-base-uncased", output_dim)
+        self.expert1 = EmbeddingExpert(config.model_name, output_dim)
+        self.expert2 = EmbeddingExpert(config.model_name, output_dim)
         self.gating = GatingNetwork(output_dim * 2, 256, num_experts)
 
     def forward(self, input_ids, attention_mask):

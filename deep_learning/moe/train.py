@@ -135,14 +135,15 @@ def main(n_epochs, batch_size, n_experts, model_name):
 
     # Create train and validation datasets
     click.secho("Preparing triplet datasets.", fg="yellow")
+    dl = TripletDataLoader(tokenizer, batch_size=batch_size)
     # Create data loaders
     train_loader, val_loader = (
-        TripletDataLoader(tokenizer, batch_size=batch_size, split="train")(),
-        TripletDataLoader(tokenizer, batch_size=batch_size, split="validation")(),
+        dl.load("train"),
+        dl.load("validation"),
     )
 
     # Initialize model
-    config = EmbeddingMoEConfig()
+    config = EmbeddingMoEConfig(model_name=model_name, num_experts=n_experts)
     model = EmbeddingMoE(config)
     model.to(device)
 
