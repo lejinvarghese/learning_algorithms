@@ -32,7 +32,9 @@ def main(batch_size):
     tokenizer = AutoTokenizer.from_pretrained(
         "thenlper/gte-small", trust_remote_code=True
     )
-    test_loader = TripletDataLoader(tokenizer, batch_size=batch_size, split="test")()
+    dl = TripletDataLoader(tokenizer, batch_size=batch_size)
+    test_loader = dl.load(split="test")
+
     model.to(device)
 
     # Evaluate the model

@@ -80,13 +80,12 @@ class TripletDataset(Dataset):
 
 
 class TripletDataLoader:
-    def __init__(self, tokenizer, repo_id="snli", batch_size=32, split="train"):
+    def __init__(self, tokenizer, repo_id="snli", batch_size=32):
         self.tokenizer = tokenizer
         self.dataset = load_dataset(repo_id)
         self.batch_size = batch_size
-        self.split = split
-        self.shuffle = True if split == "train" else False
 
-    def __call__(self):
-        triplets = TripletDataset(self.dataset[self.split], self.tokenizer)
-        return DataLoader(triplets, batch_size=self.batch_size, shuffle=self.shuffle)
+    def load(self, split="train"):
+        shuffle = True if split == "train" else False
+        triplets = TripletDataset(self.dataset[split], self.tokenizer)
+        return DataLoader(triplets, batch_size=self.batch_size, shuffle=shuffle)
