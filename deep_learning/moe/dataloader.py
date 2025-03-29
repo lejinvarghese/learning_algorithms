@@ -18,17 +18,11 @@ class TripletDataset(Dataset):
 
         # Create triplets: (anchor, positive, negative)
         # For each sentence pair with "entailment" label, find a negative example
-        entailment_pairs = [
-            (p, h) for p, h, label in filtered_data if label == 0
-        ]  # 0 is entailment in SNLI
-        contradiction_pairs = [
-            (p, h) for p, h, label in filtered_data if label == 2
-        ]  # 2 is contradiction in SNLI
+        entailment_pairs = [(p, h) for p, h, label in filtered_data if label == 0]  # 0 is entailment in SNLI
+        contradiction_pairs = [(p, h) for p, h, label in filtered_data if label == 2]  # 2 is contradiction in SNLI
 
         # Create triplets (anchor, positive, negative)
-        for premise, hypothesis in entailment_pairs[
-            :10_000_000
-        ]:  # Limit for memory reasons
+        for premise, hypothesis in entailment_pairs[:10_000_000]:  # Limit for memory reasons
             # The anchor is the premise
             anchor = premise
             # The positive is the entailed hypothesis

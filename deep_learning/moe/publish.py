@@ -22,9 +22,7 @@ upload_folder(
 
 
 ## Load model from the Hub
-config = AutoConfig.from_pretrained(
-    "lv12/bert_base_uncased_embedding_moe", trust_remote_code=True
-)
+config = AutoConfig.from_pretrained("lv12/bert_base_uncased_embedding_moe", trust_remote_code=True)
 model = AutoModel.from_pretrained(
     "lv12/bert_base_uncased_embedding_moe",
     config=config,

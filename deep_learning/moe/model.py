@@ -7,14 +7,7 @@ from transformers import PreTrainedModel, PretrainedConfig, AutoModel
 class EmbeddingMoEConfig(PretrainedConfig):
     model_type = "embedding_moe"
 
-    def __init__(
-        self,
-        model_name="bert-base-uncased",
-        output_dim=256,
-        num_experts=2,
-        dropout_rate=0.1,
-        **kwargs
-    ):
+    def __init__(self, model_name="bert-base-uncased", output_dim=256, num_experts=2, dropout_rate=0.1, **kwargs):
         super().__init__(**kwargs)
         self.model_name = model_name
         self.output_dim = output_dim
@@ -40,12 +33,8 @@ class EmbeddingExpert(nn.Module):
     def mean_pooling(self, model_output, attention_mask):
         # Mean pooling - take attention mask into account for averaging
         token_embeddings = model_output.last_hidden_state
-        input_mask_expanded = (
-            attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
-        )
-        return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(
-            input_mask_expanded.sum(1), min=1e-9
-        )
+        input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+        return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
 
     def forward(self, input_ids, attention_mask):
         outputs = self.base(input_ids=input_ids, attention_mask=attention_mask)
@@ -112,8 +101,7 @@ class EmbeddingMoE(PreTrainedModel):
 
         # Combine expert outputs
         mixed_output = (
-            gating_output[:, 0].unsqueeze(1) * expert1_output
-            + gating_output[:, 1].unsqueeze(1) * expert2_output
+            gating_output[:, 0].unsqueeze(1) * expert1_output + gating_output[:, 1].unsqueeze(1) * expert2_output
         )
 
         # Normalize the embedding to unit length

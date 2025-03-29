@@ -45,9 +45,7 @@ def get_embeddings(model, batch, device):
     return anchor_embedding, positive_embedding, negative_embedding
 
 
-def train_model(
-    model, train_loader, criterion, optimizer, scheduler, device, num_epochs=5
-):
+def train_model(model, train_loader, criterion, optimizer, scheduler, device, num_epochs=5):
     model.train()
     for epoch in range(num_epochs):
         total_loss = 0
@@ -92,9 +90,7 @@ def evaluate_model(model, test_loader, device):
 
             # Predictions and labels
             preds = (positive_distance < negative_distance).int().cpu()
-            labels = torch.ones_like(
-                preds
-            )  # Assuming positive is always the correct class
+            labels = torch.ones_like(preds)  # Assuming positive is always the correct class
 
             all_preds.extend(preds.numpy())
             all_labels.extend(labels.numpy())
@@ -153,14 +149,10 @@ def main(n_epochs, batch_size, n_experts, model_name):
     # Only optimize the projection layers and gating network
     trainable_params = [p for p in model.parameters() if p.requires_grad]
 
-    optimizer = torch.optim.AdamW(
-        trainable_params, lr=1e-3, weight_decay=0.01, eps=1e-8
-    )
+    optimizer = torch.optim.AdamW(trainable_params, lr=1e-3, weight_decay=0.01, eps=1e-8)
 
     # Learning rate scheduler
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=5, verbose=True
-    )
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=5, verbose=True)
 
     # Train the model
     click.secho("Starting training.", fg="yellow")
