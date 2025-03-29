@@ -3,10 +3,9 @@ from adapters.core import HomeDepotDataset
 
 
 def main():
-    ds = HomeDepotDataset(sample_size=10)
-    samples = ds.load()
-    click.secho(f"Dataset loaded with {len(samples)} samples.", fg="green")
-    click.secho(f"First sample: {samples[0]}", fg="blue")
+    ds = HomeDepotDataset(sample_size=None)
+    samples = ds.generate_pairs()
+    samples = ds.generate_triplets()
 
 
 if __name__ == "__main__":
