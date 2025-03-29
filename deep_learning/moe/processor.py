@@ -1,5 +1,4 @@
-import click
-from adapters.core import HomeDepotDataset
+from adapters import HomeDepotDataset
 
 
 def main():
