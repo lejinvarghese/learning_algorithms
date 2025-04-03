@@ -75,3 +75,4 @@ class BaseDataset(ABC):
             return data
         else:
             return data.shuffle(seed=RANDOM_STATE).select(range(self._sample_size))
+<
