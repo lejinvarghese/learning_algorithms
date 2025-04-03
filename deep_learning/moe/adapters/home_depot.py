@@ -44,7 +44,9 @@ class HomeDepotDataset(BaseDataset):
         self._data = self._data.map(
             lambda row: {
                 "document": self.format_document(
-                    title=row.get("name"), category=row.get("category"), description=row.get("description")
+                    title=row.get("name"),
+                    category=row.get("category"),
+                    description=row.get("description"),
                 )
             },
             remove_columns=["name", "description", "id", "entity_id"],

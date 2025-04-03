@@ -3,18 +3,24 @@ from abc import ABC, abstractmethod
 from multiprocessing import cpu_count
 from click import secho
 
-from datasets import load_dataset, Dataset
+from datasets import load_dataset
 
 RANDOM_STATE = 42
 
 
 class BaseDataset(ABC):
-    def __init__(self, repo_id: str, sample_size: int = None, split="train"):
+    def __init__(
+        self,
+        repo_id: str,
+        sample_size: int = None,
+        split="train",
+        cols: list[str] = None,
+    ):
         self._repo_id = repo_id
         self._sample_size = sample_size
 
         self._num_procs = cpu_count() - 1
-        self._data = self.load(split)
+        self._data = self.load(split, cols)
         secho(f"Total records loaded: {len(self._data)}", fg="green")
 
     @property
@@ -58,7 +64,7 @@ class BaseDataset(ABC):
             template += """
                 **Product Attributes**:
                 """
-            for k, v in kwargs.get("attributes"):
+            for k, v in kwargs.get("attributes").items():
                 template += f"""
                 **{k.title()}**: {v}
                 """
@@ -69,10 +75,13 @@ class BaseDataset(ABC):
             """
         return template.strip().lower()
 
-    def load(self, split: str):
-        data = load_dataset(self.repo_id, num_proc=self._num_procs, split=split)
+    def load(self, split: str, cols: list[str] = None):
+        secho(
+            f"Loading data from {self._repo_id} using: {self._num_procs} cores",
+            fg="yellow",
+        )
+        data = load_dataset(self.repo_id, num_proc=self._num_procs, split=split, columns=cols)
         if self._sample_size is None:
             return data
         else:
             return data.shuffle(seed=RANDOM_STATE).select(range(self._sample_size))
-<
