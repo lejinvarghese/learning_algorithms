@@ -22,4 +22,4 @@ class HomeDepotDataset(BaseDataset):
         )
 
     def generate_triplets(self, threshold=2.5):
-        super().generate_triplets(threshold=threshold)
+        return super().generate_triplets(threshold=threshold)

@@ -17,7 +17,6 @@ class BaseDataset(ABC):
     ):
         self._repo_id = repo_id
         self._sample_size = sample_size
-
         self._num_procs = cpu_count() - 1
         self._data = self.load(split, cols)
         secho(f"Total records loaded: {len(self._data)}", fg="green")
@@ -70,7 +69,7 @@ class BaseDataset(ABC):
     def load(self, split: str, cols: list[str] = None):
         secho(
             f"Loading data from {self._repo_id} using: {self._num_procs} cores",
-            fg="yellow",
+            fg=(229, 192, 123),
         )
         data = load_dataset(self.repo_id, num_proc=self._num_procs, split=split, columns=cols)
         if self._sample_size is None:
@@ -79,12 +78,12 @@ class BaseDataset(ABC):
             return data.shuffle(seed=RANDOM_STATE).select(range(self._sample_size))
 
     def generate_pairs(self):
-        self.pairs = self._data
-        metadata = [{"source": self.name}] * len(self.pairs)
-        self.pairs = self.pairs.add_column("metadata", metadata)
-        secho(f"Generated {len(self.pairs)} pairs.", fg="green")
-        secho(f"First sample: {self.pairs[0]}", fg="yellow")
-        return self.pairs
+        pairs = self._data
+        metadata = [{"source": self.name}] * len(pairs)
+        pairs = pairs.add_column("metadata", metadata)
+        secho(f"Generated {len(pairs)} pairs.", fg="green")
+        secho(f"First sample: {pairs[0]}", fg=(229, 192, 123))
+        return pairs
 
     def generate_triplets(self, threshold=3.0):
         positives = self.generate_positives(threshold=threshold).to_pandas()
@@ -98,10 +97,10 @@ class BaseDataset(ABC):
         triplets["metadata"] = triplets[metadata_cols].apply(lambda x: json.dumps(x.to_dict()), axis=1)
         triplets = triplets.drop(columns=metadata_cols)
 
-        self.triplets = Dataset.from_pandas(triplets, preserve_index=False)
-        secho(f"Generated {len(self.triplets)} triplets.", fg="green")
-        secho(f"First sample: {self.triplets[0]}", fg="yellow")
-        return self.triplets
+        triplets = Dataset.from_pandas(triplets, preserve_index=False)
+        secho(f"Generated {len(triplets)} triplets.", fg="green")
+        secho(f"First sample: {triplets[0]}", fg=(229, 192, 123))
+        return triplets
 
     def generate_positives(self, threshold):
         pos = self._data.filter(lambda x: x["relevance"] >= threshold).map(
