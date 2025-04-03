@@ -7,8 +7,11 @@
 
  ## Datasets
 - [x] Home Depot
-- [ ] Amazon
+- [x] Amazon
 - [ ] Google
 - [ ] Wayfair
 - [ ] Crowdflower
 - [ ] Walmart
+
+## Improvements
+- [ ] Add more Amazon metadata

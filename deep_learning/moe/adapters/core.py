@@ -1,6 +1,7 @@
 from abc import ABC
 from multiprocessing import cpu_count
 import json
+import re
 from click import secho
 from datasets import load_dataset, Dataset
 
@@ -39,6 +40,13 @@ class BaseDataset(ABC):
         pass
 
     @staticmethod
+    def strip_html(text):
+        if not isinstance(text, str):
+            return ""
+        clean = re.compile("<.*?>")
+        return re.sub(clean, "", text)
+
+    @staticmethod
     def format_document(**kwargs):
         if kwargs.get("title"):
             template = f"""**product title**: {kwargs.get('title')}\n"""
@@ -53,7 +61,7 @@ class BaseDataset(ABC):
 
         if kwargs.get("description"):
             template += f"""**product description**: {kwargs.get('description')}"""
-        return template.strip().lower()
+        return BaseDataset.strip_html(template.strip().lower())
 
     def load(self, split: str, cols: list[str] = None):
         secho(
