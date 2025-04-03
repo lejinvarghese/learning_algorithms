@@ -41,29 +41,18 @@ class BaseDataset(ABC):
     @staticmethod
     def format_document(**kwargs):
         if kwargs.get("title"):
-            template = f"""
-            **Product Title**: {kwargs.get('title')}
-            """
+            template = f"""**product title**: {kwargs.get('title')}\n"""
         else:
-            template = """
-            """
+            template = """"""
         if kwargs.get("category"):
-            template += f"""
-            **Product Category**: {kwargs.get('category')}
-            """
+            template += f"""**product category**: {kwargs.get('category')}\n"""
         if kwargs.get("attributes"):
-            template += """
-                **Product Attributes**:
-                """
+            template += """**product attributes**:\n"""
             for k, v in kwargs.get("attributes").items():
-                template += f"""
-                **{k.title()}**: {v}
-                """
+                template += f""" - **{k}**: {v}\n"""
 
         if kwargs.get("description"):
-            template += f"""
-            **Product Description**: {kwargs.get('description')}
-            """
+            template += f"""**product description**: {kwargs.get('description')}"""
         return template.strip().lower()
 
     def load(self, split: str, cols: list[str] = None):

@@ -1,9 +1,10 @@
 from typing import Optional
-from datasets import concatenate_datasets, DatasetDict
+from datasets import concatenate_datasets, DatasetDict, Dataset
 from click import secho
 
-from adapters.amazon import AmazonDataset
-from adapters.home_depot import HomeDepotDataset
+from adapters import AmazonDataset
+from adapters import HomeDepotDataset
+from adapters import BaseDataset
 
 DATASET_NAME = "lv12/ProductSearchDataset"
 
@@ -12,80 +13,77 @@ class DatasetAggregator:
     def __init__(
         self,
         sample_size: Optional[int] = None,
-        split: str = "train",
+        splits: list[str] = ["train", "valid", "test"],
     ):
         self.sources = [AmazonDataset, HomeDepotDataset]
         self.sample_size = sample_size
-        self.split = split
+        self.splits = splits
         self.datasets = self.generate_datasets()
+        self.subsets = {}
 
-    def generate_datasets(self):
+    def generate_datasets(self) -> dict[str, list[BaseDataset]]:
         """Generate datasets."""
-        return [
-            AmazonDataset(
-                sample_size=self.sample_size,
-                split=self.split,
-            ),
-            HomeDepotDataset(
-                sample_size=self.sample_size,
-                split=self.split,
-            ),
-        ]
+        datasets = {}
+        for split in self.splits:
+            dataset_splits = []
+            for source in self.sources:
+                try:
+                    dataset = source(sample_size=self.sample_size, split=split)
+                    dataset_splits.append(dataset)
+                except Exception as e:
+                    secho(f"Error loading dataset: {e}", fg="red")
+                    continue
+            datasets[split] = dataset_splits
+        return datasets
 
-    def generate_pairs(self):
+    def generate_pairs(self) -> Dataset:
         """Generate pairs from all datasets and concatenate them."""
-        if not self.datasets:
-            raise ValueError("No datasets added to aggregator")
+        splits = {}
+        for split in self.splits:
+            dataset_splits = self.datasets.get(split, [])
+            if len(dataset_splits) > 0:
+                pairs_list = []
+                for dataset in dataset_splits:
+                    pairs = dataset.generate_pairs()
+                    pairs_list.append(pairs)
 
-        pairs_list = []
-        for dataset in self.datasets:
-            pairs = dataset.generate_pairs()
-            pairs_list.append(pairs)
+                combined_pairs = concatenate_datasets(pairs_list)
+                secho(f"Total combined pairs: {len(combined_pairs)}", fg="blue")
+                splits[split] = combined_pairs
+        self.subsets["pairs"] = splits
+        return splits
 
-        combined_pairs = concatenate_datasets(pairs_list)
-        secho(f"Total combined pairs: {len(combined_pairs)}", fg="blue")
-        return combined_pairs
-
-    def generate_triplets(self):
+    def generate_triplets(self) -> Dataset:
         """Generate triplets from all datasets and concatenate them."""
-        if not self.datasets:
-            raise ValueError("No datasets added to aggregator")
 
-        triplets_list = []
-        for dataset in self.datasets:
-            triplets = dataset.generate_triplets()
-            triplets_list.append(triplets)
+        splits = {}
+        for split in self.splits:
+            dataset_splits = self.datasets.get(split, [])
+            if len(dataset_splits) > 0:
+                triplets_list = []
+                for dataset in dataset_splits:
+                    triplets = dataset.generate_triplets()
+                    triplets_list.append(triplets)
 
-        combined_triplets = concatenate_datasets(triplets_list)
-        secho(f"Total combined triplets: {len(combined_triplets)}", fg="blue")
-        return combined_triplets
+                combined_triplets = concatenate_datasets(triplets_list)
+                secho(f"Total combined triplets: {len(combined_triplets)}", fg="blue")
+                splits[split] = combined_triplets
+        self.subsets["triplets"] = splits
+        return splits
 
     def push_to_hub(
         self,
         repo_id: str = DATASET_NAME,
         private: bool = False,
-        overwrite: bool = True,
     ):
         """Push the combined dataset to HuggingFace Hub."""
         secho(f"Pushing combined dataset to {repo_id}", fg=(229, 192, 123))
 
-        # Generate combined pairs and triplets
-        pairs = self.generate_pairs()
-        triplets = self.generate_triplets()
-
-        pairs = DatasetDict({"train": pairs})
-        triplets = DatasetDict({"train": triplets})
-
-        # Push pairs subset
-        pairs.push_to_hub(
-            repo_id,
-            private=private,
-            config_name="pairs",
-        )
-        pairs.push_to_hub(
-            repo_id,
-            private=private,
-            config_name="triplets",
-        )
+        for name, subset in self.subsets.items():
+            DatasetDict(subset).push_to_hub(
+                repo_id,
+                private=private,
+                config_name=name,
+            )
 
         secho(f"Successfully pushed combined dataset to {repo_id}", fg="green")

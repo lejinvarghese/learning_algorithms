@@ -8,6 +8,7 @@ FEATURE_COLUMNS = [
     "product_bullet_point",
     "product_brand",
     "product_color",
+    "product_locale",
     "esci_label",
 ]
 
@@ -41,15 +42,19 @@ class AmazonDataset(BaseDataset):
         )
 
     def generate_document(self):
+        self._data = self._data.filter(lambda row: row.get("product_locale") == "us", num_proc=self._num_procs)
         self._data = self._data.map(
             lambda row: {
                 "document": self.format_document(
                     title=row.get("product_title"),
-                    description=row.get("product_description"),
+                    description=" ".join(
+                        filter(
+                            None, [row.get("product_description", "") or "", row.get("product_bullet_point", "") or ""]
+                        )
+                    ),
                     attributes={
                         "brand": row.get("product_brand"),
                         "color": row.get("product_color"),
-                        "details": row.get("product_bullet_point"),
                     },
                 )
             },
@@ -60,6 +65,7 @@ class AmazonDataset(BaseDataset):
                 "product_color",
                 "product_description",
                 "product_bullet_point",
+                "product_locale",
             ],
             num_proc=self._num_procs,
         )
