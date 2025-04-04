@@ -15,3 +15,5 @@
 
 ## Improvements
 - [ ] Add more Amazon metadata
+- [ ] Add more Google metadata
+- [ ] Normalize scores between datasets

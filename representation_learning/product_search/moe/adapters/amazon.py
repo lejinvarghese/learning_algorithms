@@ -69,3 +69,4 @@ class AmazonDataset(BaseDataset):
             ],
             num_proc=self._num_procs,
         )
+        self._n_documents = len(set(self._data.unique("document")))

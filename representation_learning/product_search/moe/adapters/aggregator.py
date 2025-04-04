@@ -46,7 +46,7 @@ class DatasetAggregator:
                     pairs_list.append(pairs)
 
                 combined_pairs = concatenate_datasets(pairs_list)
-                secho(f"Total combined pairs: {len(combined_pairs)}", fg="blue")
+                secho(f"Total pairs: {len(combined_pairs)}", fg="blue")
                 splits[split] = combined_pairs
         self.subsets["pairs"] = splits
         return splits
@@ -64,7 +64,7 @@ class DatasetAggregator:
                     triplets_list.append(triplets)
 
                 combined_triplets = concatenate_datasets(triplets_list)
-                secho(f"Total combined triplets: {len(combined_triplets)}", fg="blue")
+                secho(f"Total triplets: {len(combined_triplets)}", fg="blue")
                 splits[split] = combined_triplets
         self.subsets["triplets"] = splits
         return splits
@@ -74,8 +74,8 @@ class DatasetAggregator:
         repo_id: str = DATASET_NAME,
         private: bool = False,
     ):
-        """Push the combined dataset to HuggingFace Hub."""
-        secho(f"Pushing combined dataset to {repo_id}", fg=(229, 192, 123))
+        """Push the dataset to HuggingFace Hub."""
+        secho(f"Pushing the dataset to {repo_id}", fg=(229, 192, 123))
 
         for name, subset in self.subsets.items():
             DatasetDict(subset).push_to_hub(
@@ -84,4 +84,4 @@ class DatasetAggregator:
                 config_name=name,
             )
 
-        secho(f"Successfully pushed combined dataset to {repo_id}", fg="green")
+        secho(f"Successfully pushed the dataset to {repo_id}", fg="green")

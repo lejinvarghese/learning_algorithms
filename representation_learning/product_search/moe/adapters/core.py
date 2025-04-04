@@ -30,11 +30,20 @@ class BaseDataset(ABC):
     def data(self):
         return self._data
 
+    @property
+    def n_queries(self):
+        return self._n_queries
+
+    @property
+    def n_documents(self):
+        return self._n_documents
+
     def generate_query(self):
         self._data = self._data.map(
             lambda x: {"query": x["query"].lower()},
             num_proc=self._num_procs,
         )
+        self._n_queries = len(set(self._data.unique("query")))
 
     def generate_document(self):
         pass
@@ -53,7 +62,7 @@ class BaseDataset(ABC):
         else:
             template = """"""
         if kwargs.get("category"):
-            template += f"""**product category**: {kwargs.get('category')}\n"""
+            template += f"""**product category**: {kwargs.get('category').replace(" / ", " > ")}\n"""
         if kwargs.get("attributes"):
             template += """**product attributes**:\n"""
             for k, v in kwargs.get("attributes").items():
@@ -79,6 +88,7 @@ class BaseDataset(ABC):
         metadata = [{"source": self.name}] * len(pairs)
         pairs = pairs.add_column("metadata", metadata)
         secho(f"Generated {len(pairs)} pairs.", fg="green")
+        secho(f"Queries: {self.n_queries}, Documents: {self.n_documents}.", fg="green")
         secho(f"Pairs sample: {pairs[0]}", fg=(229, 192, 123))
         return pairs
 

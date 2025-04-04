@@ -82,6 +82,7 @@ class WayfairDataset(BaseDataset):
             ],
             num_proc=self._num_procs,
         )
+        self._n_documents = len(set(self._data.unique("document")))
 
     def generate_triplets(self, threshold=2):
         return super().generate_triplets(threshold=threshold)

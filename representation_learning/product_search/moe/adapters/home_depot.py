@@ -20,6 +20,7 @@ class HomeDepotDataset(BaseDataset):
             remove_columns=["name", "description", "id", "entity_id"],
             num_proc=self._num_procs,
         )
+        self._n_documents = len(set(self._data.unique("document")))
 
-    def generate_triplets(self, threshold=2.5):
+    def generate_triplets(self, threshold=2.3):
         return super().generate_triplets(threshold=threshold)
