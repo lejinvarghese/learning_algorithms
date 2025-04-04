@@ -1,5 +1,5 @@
 from click import secho
-from datasets import load_dataset
+from datasets import load_dataset, Dataset
 from adapters.core import BaseDataset, RANDOM_STATE
 
 FEATURE_COLUMNS = [
@@ -26,7 +26,7 @@ class GoogleDataset(BaseDataset):
 
     def _map_relevance(self):
         self._data = self._data.map(
-            lambda x: {"relevance": x.get("score_reciprocal", 0.0)},
+            lambda x: {"relevance": round(x.get("score_reciprocal", 0.0), 2)},
             num_proc=self._num_procs,
             remove_columns=["score_reciprocal"],
         )
@@ -40,16 +40,22 @@ class GoogleDataset(BaseDataset):
             split = "in_domain"
         elif split == "test":
             split = "zero_shot"
-        data = load_dataset(self.repo_id, num_proc=self._num_procs, split=split, columns=cols)
-        data = data.filter(lambda row: row.get("product_locale") == "us", num_proc=self._num_procs)
-        if self._sample_size is None:
-            return data
+        streaming_data = load_dataset(self.repo_id, split=split, columns=cols, streaming=True)
+        if cols:
+            streaming_data = streaming_data.remove_columns(
+                [col for col in streaming_data.column_names if col not in cols]
+            )
+        if self._sample_size:
+            examples = list(streaming_data.take(self._sample_size))
         else:
-            return data.shuffle(seed=RANDOM_STATE).select(range(self._sample_size))
+            examples = list(streaming_data)
+
+        data = Dataset.from_dict({k: [example[k] for example in examples] for k in examples[0].keys()})
+        return data.shuffle(seed=RANDOM_STATE)
 
     def generate_document(self):
         self._data = self._data.map(
-            lambda row: {"document": self.format_document(title=row.get("product_title"))},
-            remove_columns=["product_id"],
+            lambda row: {"document": self.format_document(title=row.get("title"))},
+            remove_columns=["product_id", "title"],
             num_proc=self._num_procs,
         )

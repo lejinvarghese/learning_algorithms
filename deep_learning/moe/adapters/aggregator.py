@@ -13,7 +13,7 @@ class DatasetAggregator:
         sample_size: Optional[int] = None,
         splits: list[str] = ["train", "test"],
     ):
-        self.sources = [HomeDepotDataset, AmazonDataset, WayfairDataset]
+        self.sources = [HomeDepotDataset, AmazonDataset, WayfairDataset, GoogleDataset]
         self.sample_size = sample_size
         self.splits = splits
         self.datasets = self.generate_datasets()

@@ -8,8 +8,8 @@
  ## Datasets
 - [x] Home Depot
 - [x] Amazon
-- [ ] Google
-- [ ] Wayfair
+- [x] Google
+- [x] Wayfair
 - [ ] Crowdflower
 - [ ] Walmart
 

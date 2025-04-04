@@ -72,7 +72,7 @@ class BaseDataset(ABC):
         if self._sample_size is None:
             return data
         else:
-            return data.shuffle(seed=RANDOM_STATE).select(range(self._sample_size))
+            return data.shuffle(seed=RANDOM_STATE).select(range(min(len(data), self._sample_size)))
 
     def generate_pairs(self):
         pairs = self._data
