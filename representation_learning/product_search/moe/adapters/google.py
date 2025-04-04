@@ -1,7 +1,8 @@
 from click import secho
-from datasets import load_dataset, Dataset
-from adapters.core import BaseDataset, RANDOM_STATE
-from adapters.negative_miner import HardNegativeMiner
+from datasets import Dataset, load_dataset
+
+from adapters.core import RANDOM_STATE, BaseDataset
+from adapters.miners import HardNegativeMiner
 
 FEATURE_COLUMNS = [
     "query",

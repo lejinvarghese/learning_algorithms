@@ -1,5 +1,5 @@
 import click
-from adapters import DatasetAggregator, HomeDepotDataset
+from adapters import DatasetAggregator
 
 
 @click.command()

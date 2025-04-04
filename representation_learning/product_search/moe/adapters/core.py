@@ -1,9 +1,10 @@
-from abc import ABC
-from multiprocessing import cpu_count
 import json
 import re
+from abc import ABC
+from multiprocessing import cpu_count
+
 from click import secho
-from datasets import load_dataset, Dataset
+from datasets import Dataset, load_dataset
 
 RANDOM_STATE = 42
 

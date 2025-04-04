@@ -1,8 +1,7 @@
 from typing import Optional
-from datasets import concatenate_datasets, DatasetDict, Dataset
 from click import secho
-
-from adapters import BaseDataset, AmazonDataset, HomeDepotDataset, GoogleDataset, WayfairDataset
+from datasets import Dataset, DatasetDict, concatenate_datasets
+from adapters import AmazonDataset, BaseDataset, CrowdFlowerDataset, GoogleDataset, HomeDepotDataset, WayfairDataset
 
 DATASET_NAME = "lv12/ProductSearchDataset"
 
@@ -13,8 +12,8 @@ class DatasetAggregator:
         sample_size: Optional[int] = None,
         splits: list[str] = ["train", "test"],
     ):
-        self.sources = [HomeDepotDataset, AmazonDataset, WayfairDataset, GoogleDataset]
-        self.sources = [GoogleDataset]
+        self.sources = [HomeDepotDataset, AmazonDataset, WayfairDataset, GoogleDataset, CrowdFlowerDataset]
+        # self.sources = [GoogleDataset]
         self.sample_size = sample_size
         self.splits = splits
         self.datasets = self.generate_datasets()
@@ -74,7 +73,7 @@ class DatasetAggregator:
         self,
         repo_id: str = DATASET_NAME,
         private: bool = False,
-    ):
+    ) -> None:
         """Push the dataset to HuggingFace Hub."""
         secho(f"Pushing the dataset to {repo_id}", fg=(229, 192, 123))
 
