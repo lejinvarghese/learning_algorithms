@@ -12,7 +12,7 @@ FEATURE_COLUMNS = [
     "esci_label",
 ]
 
-ESCI_LABEL_MAPPING = {
+LABEL_MAPPING = {
     "Exact": 3.0,
     "Substitute": 2.0,
     "Complement": 1.0,
@@ -36,7 +36,7 @@ class AmazonDataset(BaseDataset):
 
     def _map_relevance(self):
         self._data = self._data.map(
-            lambda x: {"relevance": ESCI_LABEL_MAPPING.get(x["esci_label"], 0.0)},
+            lambda x: {"relevance": LABEL_MAPPING.get(x["esci_label"], 0.0)},
             num_proc=self._num_procs,
             remove_columns=["esci_label"],
         )

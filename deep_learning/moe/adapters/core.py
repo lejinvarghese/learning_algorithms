@@ -79,7 +79,7 @@ class BaseDataset(ABC):
         metadata = [{"source": self.name}] * len(pairs)
         pairs = pairs.add_column("metadata", metadata)
         secho(f"Generated {len(pairs)} pairs.", fg="green")
-        secho(f"First sample: {pairs[0]}", fg=(229, 192, 123))
+        secho(f"Pairs sample: {pairs[0]}", fg=(229, 192, 123))
         return pairs
 
     def generate_triplets(self, threshold=3.0):
@@ -96,7 +96,7 @@ class BaseDataset(ABC):
 
         triplets = Dataset.from_pandas(triplets, preserve_index=False)
         secho(f"Generated {len(triplets)} triplets.", fg="green")
-        secho(f"First sample: {triplets[0]}", fg=(229, 192, 123))
+        secho(f"Triplets sample: {triplets[0]}", fg=(229, 192, 123))
         return triplets
 
     def generate_positives(self, threshold):

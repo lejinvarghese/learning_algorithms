@@ -2,9 +2,7 @@ from typing import Optional
 from datasets import concatenate_datasets, DatasetDict, Dataset
 from click import secho
 
-from adapters import AmazonDataset
-from adapters import HomeDepotDataset
-from adapters import BaseDataset
+from adapters import BaseDataset, AmazonDataset, HomeDepotDataset, GoogleDataset, WayfairDataset
 
 DATASET_NAME = "lv12/ProductSearchDataset"
 
@@ -15,7 +13,7 @@ class DatasetAggregator:
         sample_size: Optional[int] = None,
         splits: list[str] = ["train", "test"],
     ):
-        self.sources = [AmazonDataset, HomeDepotDataset]
+        self.sources = [HomeDepotDataset, AmazonDataset, WayfairDataset]
         self.sample_size = sample_size
         self.splits = splits
         self.datasets = self.generate_datasets()
