@@ -1,0 +1,12 @@
+sentence-transformers==4.0.1
+black[jupyter]==24.3.0
+datasets==2.19.1
+tensorboard==2.16.2
+tensorboardX==2.6.2.2
+einops==0.8.0
+accelerate==0.27.2
+transformers==4.49.0
+uv==0.5.11
+python-dotenv==1.0.0
+jupyterlab==4.0.9
+click==8.1.7
