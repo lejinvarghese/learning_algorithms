@@ -1,6 +1,7 @@
 from click import secho
 from datasets import load_dataset, Dataset
 from adapters.core import BaseDataset, RANDOM_STATE
+from adapters.negative_miner import HardNegativeMiner
 
 FEATURE_COLUMNS = [
     "query",
@@ -26,7 +27,7 @@ class GoogleDataset(BaseDataset):
 
     def _map_relevance(self):
         self._data = self._data.map(
-            lambda x: {"relevance": round(x.get("score_reciprocal", 0.0), 2)},
+            lambda x: {"relevance": round(1 + (x.get("score_reciprocal", 0.0) / 100) * 2, 2)},
             num_proc=self._num_procs,
             remove_columns=["score_reciprocal"],
         )
@@ -60,3 +61,16 @@ class GoogleDataset(BaseDataset):
             num_proc=self._num_procs,
         )
         self._n_documents = len(set(self._data.unique("document")))
+
+    def generate_triplets(self, threshold=1.0):
+        return super().generate_triplets(threshold=threshold)
+
+    def generate_negatives(self, threshold=0.8):
+        neg = self._data.map(
+            lambda x: {"anchor": x["query"]},
+            num_proc=self._num_procs,
+            remove_columns=["query"],
+        )
+        neg = HardNegativeMiner(dataset=neg, max_score=threshold).run()
+        secho(f"Generated {len(neg)} negatives.", fg="green")
+        return neg
