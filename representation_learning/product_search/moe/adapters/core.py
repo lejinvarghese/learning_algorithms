@@ -4,7 +4,8 @@ from abc import ABC
 from multiprocessing import cpu_count
 
 from click import secho
-from datasets import Dataset, load_dataset
+from tqdm import trange
+from datasets import Dataset, load_dataset, concatenate_datasets
 
 RANDOM_STATE = 42
 
@@ -20,6 +21,7 @@ class BaseDataset(ABC):
         self._repo_id = repo_id
         self._sample_size = sample_size
         self._num_procs = cpu_count() - 1
+        self._split = split
         self._data = self.load(split, cols)
         secho(f"Total records loaded: {len(self._data)}", fg="green")
 
@@ -75,7 +77,7 @@ class BaseDataset(ABC):
 
     def load(self, split: str, cols: list[str] = None):
         secho(
-            f"Loading data from {self._repo_id} using: {self._num_procs} cores",
+            f"Loading data from {self._repo_id} for split {split} using: {self._num_procs} cores",
             fg=(229, 192, 123),
         )
         data = load_dataset(self.repo_id, num_proc=self._num_procs, split=split, columns=cols)
@@ -86,28 +88,89 @@ class BaseDataset(ABC):
 
     def generate_pairs(self):
         pairs = self._data
-        metadata = [{"source": self.name}] * len(pairs)
-        pairs = pairs.add_column("metadata", metadata)
+        source = [self.name] * len(pairs)
+        pairs = pairs.add_column("source", source)
         secho(f"Generated {len(pairs)} pairs.", fg="green")
         secho(f"Queries: {self.n_queries}, Documents: {self.n_documents}.", fg="green")
         secho(f"Pairs sample: {pairs[0]}", fg=(229, 192, 123))
         return pairs
 
     def generate_triplets(self, threshold=3.0):
-        positives = self.generate_positives(threshold=threshold).to_pandas()
-        negatives = self.generate_negatives(threshold=threshold).to_pandas()
-        triplets = positives.merge(negatives, on="anchor", suffixes=("_positive", "_negative"))
-        triplets["margin"] = round(triplets["relevance_positive"] - triplets["relevance_negative"], 2)
-        triplets["source"] = self.name
+        # Generate positives and negatives as Hugging Face datasets
+        positives = self.generate_positives(threshold=threshold)
+        negatives = self.generate_negatives(threshold=threshold)
 
-        include_cols = {"anchor", "positive", "negative", "margin"}
-        metadata_cols = [col for col in triplets.columns if col not in include_cols]
-        triplets["metadata"] = triplets[metadata_cols].apply(lambda x: json.dumps(x.to_dict()), axis=1)
-        triplets = triplets.drop(columns=metadata_cols)
+        # Get unique anchors from both datasets
+        positive_anchors = set(positives.unique("anchor"))
+        negative_anchors = set(negatives.unique("anchor"))
+        common_anchors = positive_anchors & negative_anchors
 
-        triplets = Dataset.from_pandas(triplets, preserve_index=False)
+        # Filter datasets to only include common anchors - do this once
+        positives_filtered = positives.filter(lambda x: x["anchor"] in common_anchors)
+        negatives_filtered = negatives.filter(lambda x: x["anchor"] in common_anchors)
+
+        # Group by anchor - do this once for the entire dataset
+        pos_by_anchor = {}
+        neg_by_anchor = {}
+
+        for item in positives_filtered:
+            anchor = item["anchor"]
+            if anchor not in pos_by_anchor:
+                pos_by_anchor[anchor] = []
+            pos_by_anchor[anchor].append(item)
+
+        for item in negatives_filtered:
+            anchor = item["anchor"]
+            if anchor not in neg_by_anchor:
+                neg_by_anchor[anchor] = []
+            neg_by_anchor[anchor].append(item)
+
+        # Create triplets in batches
+        batch_size = 1000
+        anchors_list = list(common_anchors)
+        all_triplets = []
+
+        for i in trange(0, len(anchors_list), batch_size, desc="Generating triplets", colour="yellow"):
+            batch_anchors = anchors_list[i : i + batch_size]
+            batch_triplets = []
+
+            for anchor in batch_anchors:
+                pos_items = pos_by_anchor.get(anchor, [])
+                neg_items = neg_by_anchor.get(anchor, [])
+
+                for pos_item in pos_items:
+                    for neg_item in neg_items:
+                        # Extract metadata
+                        metadata = {}
+                        for k, v in pos_item.items():
+                            if k not in ["anchor", "positive"]:
+                                metadata[f"{k}_positive"] = v
+                        for k, v in neg_item.items():
+                            if k not in ["anchor", "negative"]:
+                                metadata[f"{k}_negative"] = v
+
+                        # Create triplet
+                        triplet = {
+                            "anchor": anchor,
+                            "positive": pos_item["positive"],
+                            "negative": neg_item["negative"],
+                            "margin": round(pos_item.get("relevance", 0) - neg_item.get("relevance", 0), 2),
+                            "source": self.name,
+                        }
+
+                        if metadata:
+                            triplet["metadata"] = json.dumps(metadata)
+
+                        batch_triplets.append(triplet)
+
+            all_triplets.extend(batch_triplets)
+
+        # Convert to Hugging Face dataset
+        triplets = Dataset.from_list(all_triplets)
+
         secho(f"Generated {len(triplets)} triplets.", fg="green")
-        secho(f"Triplets sample: {triplets[0]}", fg=(229, 192, 123))
+        if len(triplets) > 0:
+            secho(f"Triplets sample: {triplets[0]}", fg=(229, 192, 123))
         return triplets
 
     def generate_positives(self, threshold):

@@ -1,3 +1,4 @@
+from click import secho
 from adapters.core import BaseDataset
 
 
@@ -24,11 +25,14 @@ class CrowdFlowerDataset(BaseDataset):
         self._map_relevance()
 
     def _map_relevance(self):
-        self._data = self._data.map(
-            lambda x: {"relevance": x.get("median_relevance", 1.0) - 1.0},
-            num_proc=self._num_procs,
-            remove_columns=["median_relevance"],
-        )
+        if self._split == "train":
+            self._data = self._data.map(
+                lambda x: {"relevance": x.get("median_relevance", 1.0) - 1.0},
+                num_proc=self._num_procs,
+                remove_columns=["median_relevance"],
+            )
+        else:
+            raise ValueError(f"Skipping {self._split} split due to missing relevance labels")
 
     def generate_document(self):
         self._data = self._data.map(
