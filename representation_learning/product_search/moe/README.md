@@ -2,6 +2,7 @@
 
 ```bash
 python3 processor.py --sample_size 1000
+python3 processor.py --sample_size 1000 --subset_name pairs
 python3 processor.py --sample_size 1000 --subset_name triplets
 ```
 
@@ -15,7 +16,7 @@ python3 processor.py --sample_size 1000 --subset_name triplets
 - [x] Amazon
 - [x] Google
 - [x] Wayfair
-- [ ] Crowdflower
+- [x] Crowdflower
 - [ ] Walmart
 
 ## Improvements
@@ -23,8 +24,30 @@ python3 processor.py --sample_size 1000 --subset_name triplets
 - [ ] Add more Google metadata
 - [ ] Normalize scores between datasets
 
-Home Depot: Queries: 11199, Documents: 39726.
-Amazon: Queries: 38009, Documents: 34066.
-Wayfair: Queries: 474, Documents: 26224.
-Google: Queries: 1025, Documents: 46524.
-Crowdflower: Queries: 261, Documents: 9912.
+
+### Sources
+| Dataset | Repo ID | Source |
+|-------------|---------|--------|
+| Google | Marqo/marqo-GS-10M | Google Shopping |
+| Amazon | tasksource/esci | Amazon ESCI |
+| Wayfair | napsternxg/wands | Wayfair |
+| Home Depot | bstds/home_depot | Home Depot |
+| Crowdflower | napsternxg/kaggle_crowdflower_ecommerce_search_relevance | Crowdflower |
+
+### Train
+
+| Dataset     | Queries | Documents | Pairs    |
+|-------------|---------|-----------|----------|
+| Google      | 77,288  | 2,202,907 | 3,926,764|
+| Amazon      | 99,408  | 985,476   | 1,420,372|
+| Wayfair     | 477     | 38,854    | 140,068  |
+| Home Depot  | 11,795  | 54,360    | 74,067   |
+| Crowdflower | 261     | 9,912     | 10,158   |
+
+### Test
+
+| Dataset     | Queries | Documents | Pairs    |
+|-------------|---------|-----------|----------|
+| Google      | 19,564  | 748,386   | 981,204  |
+| Amazon      | 30,947  | 364,004   | 434,234  |
+| Wayfair     | 477     | 25,317    | 46,690   |

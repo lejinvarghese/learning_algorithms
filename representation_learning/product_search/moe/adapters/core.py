@@ -4,22 +4,32 @@ from abc import ABC
 from multiprocessing import cpu_count
 
 from click import secho
-from tqdm import trange
-from datasets import Dataset, load_dataset, concatenate_datasets
+import random
+            
+from datasets import Dataset, load_dataset, Features, Value
 
 RANDOM_STATE = 42
+random.seed(RANDOM_STATE)
 
+DATASET_CHUNK_SIZES = { # Define specific chunk sizes here
+    "wayfair": 100,
+    "amazon": 5000,
+    # Add other datasets if needed
+}
+DEFAULT_CHUNK_SIZE = 1000
 
 class BaseDataset(ABC):
     def __init__(
         self,
         repo_id: str,
         sample_size: int = None,
+        chunk_size: int = 1000,
         split="train",
         cols: list[str] = None,
     ):
         self._repo_id = repo_id
         self._sample_size = sample_size
+        self._chunk_size = chunk_size
         self._num_procs = cpu_count() - 1
         self._split = split
         self._data = self.load(split, cols)
@@ -41,12 +51,35 @@ class BaseDataset(ABC):
     def n_documents(self):
         return self._n_documents
 
-    def generate_query(self):
-        self._data = self._data.map(
-            lambda x: {"query": x["query"].lower()},
-            num_proc=self._num_procs,
-        )
-        self._n_queries = len(set(self._data.unique("query")))
+    def generate_query(self, queries_already_sampled=False):
+        secho(f"Generating queries for {self.name} dataset...", fg="blue")
+        
+        self._unique_queries = list(set(self._data.unique("query")))
+        self._n_queries = len(self._unique_queries)
+
+        if not queries_already_sampled and self._sample_size is not None and self._sample_size < self._n_queries:
+             secho(f"Applying sampling in BaseDataset.generate_query: {self._sample_size} queries", fg="yellow")
+             sampled_queries = random.sample(self._unique_queries, self._sample_size)
+             self._unique_queries = sampled_queries
+             self._n_queries = len(self._unique_queries)
+             self._data = self._data.filter(
+                 lambda x: x["query"] in self._unique_queries,
+                 num_proc=self._num_procs
+             )
+
+        chunks = {}
+        effective_chunk_size = DATASET_CHUNK_SIZES.get(getattr(self, 'name', None), self._chunk_size or DEFAULT_CHUNK_SIZE)
+
+        if self._n_queries > 0 and effective_chunk_size > 0:
+            for i in range(0, self._n_queries, effective_chunk_size):
+                chunk_index = i // effective_chunk_size
+                chunks[chunk_index] = self._unique_queries[i:i + effective_chunk_size]
+        else:
+            chunks = {0: self._unique_queries}
+
+        self._max_chunks = len(chunks)
+        self._query_chunks = chunks
+        secho(f"Total query chunks created: {self._max_chunks}", fg="blue")
 
     def generate_document(self):
         pass
@@ -80,11 +113,9 @@ class BaseDataset(ABC):
             f"Loading data from {self._repo_id} for split {split} using: {self._num_procs} cores",
             fg=(229, 192, 123),
         )
-        data = load_dataset(self.repo_id, num_proc=self._num_procs, split=split, columns=cols)
-        if self._sample_size is None:
-            return data
-        else:
-            return data.shuffle(seed=RANDOM_STATE).select(range(min(len(data), self._sample_size)))
+        data = load_dataset(self._repo_id, num_proc=self._num_procs, split=split, columns=cols)
+        secho(f"Total records loaded: {len(data)}", fg="green")
+        return data
 
     def generate_pairs(self):
         pairs = self._data
@@ -92,101 +123,137 @@ class BaseDataset(ABC):
         pairs = pairs.add_column("source", source)
         secho(f"Generated {len(pairs)} pairs.", fg="green")
         secho(f"Queries: {self.n_queries}, Documents: {self.n_documents}.", fg="green")
-        secho(f"Pairs sample: {pairs[0]}", fg=(229, 192, 123))
         return pairs
 
-    def generate_triplets(self, threshold=3.0):
-        # Generate positives and negatives as Hugging Face datasets
-        positives = self.generate_positives(threshold=threshold)
-        negatives = self.generate_negatives(threshold=threshold)
+    def generate_triplets(self, threshold=3.0, chunk_index: int = None):
+        if chunk_index is not None:
+             secho(f"Generating triplets for {self.name} chunk {chunk_index}...", fg="blue")
+        
+        chunk_data = self._data
+        
+        if chunk_index is not None and self._query_chunks and chunk_index in self._query_chunks:
+            chunk_queries = set(self._query_chunks[chunk_index])
+            if not chunk_queries:
+                 return self._create_empty_triplet_dataset()
+                 
+            chunk_data = self._data.filter(
+                lambda x: x["query"] in chunk_queries,
+                num_proc=self._num_procs
+            )
+        elif chunk_index is not None:
+             secho(f"Warning: Chunk index {chunk_index} not found or query chunks empty.", fg="yellow")
+             return self._create_empty_triplet_dataset()
+        
+        positives_ds = self.generate_positives(threshold=threshold, data_subset=chunk_data)
+        negatives_ds = self.generate_negatives(threshold=threshold, data_subset=chunk_data)
 
-        # Get unique anchors from both datasets
-        positive_anchors = set(positives.unique("anchor"))
-        negative_anchors = set(negatives.unique("anchor"))
-        common_anchors = positive_anchors & negative_anchors
+        if len(positives_ds) == 0 or len(negatives_ds) == 0:
+            return self._create_empty_triplet_dataset()
 
-        # Filter datasets to only include common anchors - do this once
-        positives_filtered = positives.filter(lambda x: x["anchor"] in common_anchors)
-        negatives_filtered = negatives.filter(lambda x: x["anchor"] in common_anchors)
+        try:
+             positives = positives_ds.to_pandas()
+             negatives = negatives_ds.to_pandas()
+        except Exception as e:
+             secho(f"Error converting dataset subset to pandas (chunk {chunk_index}): {e}", fg="red")
+             return self._create_empty_triplet_dataset()
 
-        # Group by anchor - do this once for the entire dataset
-        pos_by_anchor = {}
-        neg_by_anchor = {}
+        positives = positives.rename(columns={"positive": "document", "relevance": "relevance_positive"})
+        negatives = negatives.rename(columns={"negative": "document", "relevance": "relevance_negative"})
 
-        for item in positives_filtered:
-            anchor = item["anchor"]
-            if anchor not in pos_by_anchor:
-                pos_by_anchor[anchor] = []
-            pos_by_anchor[anchor].append(item)
+        if "anchor" not in positives.columns or "anchor" not in negatives.columns:
+             secho("Error: 'anchor' column missing before merge.", fg="red")
+             return self._create_empty_triplet_dataset()
+        if "relevance_positive" not in positives.columns:
+             positives['relevance_positive'] = threshold
+             secho("Warning: 'relevance' column missing in positives, added default.", fg="yellow")
+        if "relevance_negative" not in negatives.columns:
+             negatives['relevance_negative'] = threshold - 0.1
+             secho("Warning: 'relevance' column missing in negatives, added default.", fg="yellow")
 
-        for item in negatives_filtered:
-            anchor = item["anchor"]
-            if anchor not in neg_by_anchor:
-                neg_by_anchor[anchor] = []
-            neg_by_anchor[anchor].append(item)
+        try:
+            triplets = positives.merge(negatives, on="anchor", suffixes=("_pos", "_neg")) 
+        except Exception as e:
+             secho(f"Error merging pandas DataFrames (chunk {chunk_index}): {e}", fg="red")
+             return self._create_empty_triplet_dataset()
 
-        # Create triplets in batches
-        batch_size = 1000
-        anchors_list = list(common_anchors)
-        all_triplets = []
+        if triplets.empty:
+             return self._create_empty_triplet_dataset()
+             
+        triplets["margin"] = round(triplets["relevance_positive"] - triplets["relevance_negative"], 2)
+        triplets["source"] = self.name
+        triplets = triplets.rename(columns={"document_pos": "positive", "document_neg": "negative"})
 
-        for i in trange(0, len(anchors_list), batch_size, desc="Generating triplets", colour="yellow"):
-            batch_anchors = anchors_list[i : i + batch_size]
-            batch_triplets = []
+        metadata_cols = [col for col in ['relevance_positive', 'relevance_negative'] if col in triplets.columns]
+        if metadata_cols:
+             try:
+                 triplets["metadata"] = triplets[metadata_cols].apply(lambda x: json.dumps(x.to_dict()), axis=1)
+                 triplets = triplets.drop(columns=metadata_cols)
+             except Exception as e:
+                  secho(f"Error creating metadata JSON (chunk {chunk_index}): {e}", fg="yellow")
+                  triplets["metadata"] = "{}"
+        else:
+             triplets["metadata"] = "{}"
 
-            for anchor in batch_anchors:
-                pos_items = pos_by_anchor.get(anchor, [])
-                neg_items = neg_by_anchor.get(anchor, [])
+        final_cols = ["anchor", "positive", "negative", "margin", "source", "metadata"]
+        missing_cols = [col for col in final_cols if col not in triplets.columns]
+        if missing_cols:
+             secho(f"Error: Final columns missing before Dataset creation: {missing_cols}", fg="red")
+             return self._create_empty_triplet_dataset()
+        
+        triplets_final_df = triplets[final_cols]
 
-                for pos_item in pos_items:
-                    for neg_item in neg_items:
-                        # Extract metadata
-                        metadata = {}
-                        for k, v in pos_item.items():
-                            if k not in ["anchor", "positive"]:
-                                metadata[f"{k}_positive"] = v
-                        for k, v in neg_item.items():
-                            if k not in ["anchor", "negative"]:
-                                metadata[f"{k}_negative"] = v
+        try:
+            triplets_dataset = Dataset.from_pandas(triplets_final_df, preserve_index=False, features=self._get_triplet_features())
+            secho(f"Generated {len(triplets_dataset)} triplets for chunk {chunk_index}.", fg="green")
+            return triplets_dataset
+        except Exception as e:
+            secho(f"Error converting final DataFrame to Dataset (chunk {chunk_index}): {e}", fg="red")
+            return self._create_empty_triplet_dataset()
 
-                        # Create triplet
-                        triplet = {
-                            "anchor": anchor,
-                            "positive": pos_item["positive"],
-                            "negative": neg_item["negative"],
-                            "margin": round(pos_item.get("relevance", 0) - neg_item.get("relevance", 0), 2),
-                            "source": self.name,
-                        }
+    def _get_triplet_features(self):
+        return Features({
+            "anchor": Value("string"),
+            "positive": Value("string"),
+            "negative": Value("string"),
+            "margin": Value("float64"),
+            "source": Value("string"),
+            "metadata": Value("string")
+        })
 
-                        if metadata:
-                            triplet["metadata"] = json.dumps(metadata)
+    def _create_empty_triplet_dataset(self):
+        return Dataset.from_dict({
+            "anchor": [], "positive": [], "negative": [], 
+            "margin": [], "source": [], "metadata": []
+        }, features=self._get_triplet_features())
 
-                        batch_triplets.append(triplet)
+    def generate_positives(self, threshold, data_subset=None):
+        data_to_process = data_subset if data_subset is not None else self._data
+        if not data_to_process or len(data_to_process) == 0:
+             return Dataset.from_dict({"anchor": [], "positive": [], "relevance": []})
 
-            all_triplets.extend(batch_triplets)
-
-        # Convert to Hugging Face dataset
-        triplets = Dataset.from_list(all_triplets)
-
-        secho(f"Generated {len(triplets)} triplets.", fg="green")
-        if len(triplets) > 0:
-            secho(f"Triplets sample: {triplets[0]}", fg=(229, 192, 123))
-        return triplets
-
-    def generate_positives(self, threshold):
-        pos = self._data.filter(lambda x: x["relevance"] >= threshold).map(
-            lambda x: {"anchor": x["query"], "positive": x["document"]},
+        if "relevance" not in data_to_process.column_names:
+             secho("Error: 'relevance' column missing for generate_positives.", fg="red")
+             return Dataset.from_dict({"anchor": [], "positive": [], "relevance": []})
+             
+        pos = data_to_process.filter(lambda x: x["relevance"] >= threshold, num_proc=self._num_procs).map(
+            lambda x: {"anchor": x["query"], "positive": x["document"], "relevance": x["relevance"]},
             num_proc=self._num_procs,
-            remove_columns=["query", "document"],
+            remove_columns=[col for col in data_to_process.column_names if col not in ["query", "document", "relevance"]],
         )
-        secho(f"Generated {len(pos)} positives.", fg="green")
         return pos
 
-    def generate_negatives(self, threshold):
-        neg = self._data.filter(lambda x: x["relevance"] < threshold).map(
-            lambda x: {"anchor": x["query"], "negative": x["document"]},
+    def generate_negatives(self, threshold, data_subset=None):
+        data_to_process = data_subset if data_subset is not None else self._data
+        if not data_to_process or len(data_to_process) == 0:
+             return Dataset.from_dict({"anchor": [], "negative": [], "relevance": []})
+             
+        if "relevance" not in data_to_process.column_names:
+             secho("Error: 'relevance' column missing for generate_negatives (base).", fg="red")
+             return Dataset.from_dict({"anchor": [], "negative": [], "relevance": []})
+
+        neg = data_to_process.filter(lambda x: x["relevance"] < threshold, num_proc=self._num_procs).map(
+            lambda x: {"anchor": x["query"], "negative": x["document"], "relevance": x["relevance"]},
             num_proc=self._num_procs,
-            remove_columns=["query", "document"],
+            remove_columns=[col for col in data_to_process.column_names if col not in ["query", "document", "relevance"]],
         )
-        secho(f"Generated {len(neg)} negatives.", fg="green")
         return neg

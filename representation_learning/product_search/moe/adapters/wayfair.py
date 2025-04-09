@@ -16,10 +16,11 @@ class WayfairDataset(BaseDataset):
         self,
         repo_id="napsternxg/wands",
         sample_size=None,
+        chunk_size=100,
         split="train",
         cols=FEATURE_COLUMNS,
     ):
-        super().__init__(repo_id, sample_size, split, cols)
+        super().__init__(repo_id, sample_size, chunk_size, split, cols)
         self.name = "wayfair"
         self.generate_query()
         self.generate_document()
@@ -84,5 +85,5 @@ class WayfairDataset(BaseDataset):
         )
         self._n_documents = len(set(self._data.unique("document")))
 
-    def generate_triplets(self, threshold=2):
-        return super().generate_triplets(threshold=threshold)
+    def generate_triplets(self, threshold=2, chunk_index: int = None):
+        return super().generate_triplets(threshold=threshold, chunk_index=chunk_index)

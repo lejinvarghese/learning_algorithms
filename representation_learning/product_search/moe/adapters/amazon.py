@@ -25,10 +25,11 @@ class AmazonDataset(BaseDataset):
         self,
         repo_id="tasksource/esci",
         sample_size=None,
+        chunk_size=1000,
         split="train",
         cols=FEATURE_COLUMNS,
     ):
-        super().__init__(repo_id, sample_size, split, cols)
+        super().__init__(repo_id, sample_size, chunk_size, split, cols)
         self.name = "amazon"
         self._map_relevance()
         self.generate_query()

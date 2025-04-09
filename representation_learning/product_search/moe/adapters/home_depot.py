@@ -2,8 +2,8 @@ from adapters.core import BaseDataset
 
 
 class HomeDepotDataset(BaseDataset):
-    def __init__(self, repo_id="bstds/home_depot", sample_size=None, split="train"):
-        super().__init__(repo_id, sample_size, split)
+    def __init__(self, repo_id="bstds/home_depot", sample_size=None, chunk_size=1000, split="train"):
+        super().__init__(repo_id, sample_size, chunk_size, split)
         self.name = "home_depot"
         self.generate_query()
         self.generate_document()
@@ -22,5 +22,5 @@ class HomeDepotDataset(BaseDataset):
         )
         self._n_documents = len(set(self._data.unique("document")))
 
-    def generate_triplets(self, threshold=2.3):
-        return super().generate_triplets(threshold=threshold)
+    def generate_triplets(self, threshold=2.3, chunk_index: int = None):
+        return super().generate_triplets(threshold=threshold, chunk_index=chunk_index)

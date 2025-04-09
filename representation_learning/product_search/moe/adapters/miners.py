@@ -28,7 +28,7 @@ class HardNegativeMiner:
         dataset = mine_hard_negatives(
             dataset=self.dataset,
             model=self.bi_encoder,
-            cross_encoder=self.cross_encoder,
+            # cross_encoder=self.cross_encoder,
             anchor_column_name="anchor",
             positive_column_name="document",
             range_min=5,
@@ -36,10 +36,11 @@ class HardNegativeMiner:
             max_score=self.max_score,
             min_score=self.min_score,
             margin=0,
-            num_negatives=10,
+            num_negatives=5,
             sampling_strategy="random",
             batch_size=32,
             use_faiss=False,
+            use_multi_process=True
         )
         dataset = dataset.map(
             lambda x: {"relevance": 0.6},

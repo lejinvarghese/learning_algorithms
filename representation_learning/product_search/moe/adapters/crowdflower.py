@@ -15,10 +15,11 @@ class CrowdFlowerDataset(BaseDataset):
         self,
         repo_id="napsternxg/kaggle_crowdflower_ecommerce_search_relevance",
         sample_size=None,
+        chunk_size=1000,
         split="train",
         cols=FEATURE_COLUMNS,
     ):
-        super().__init__(repo_id, sample_size, split, cols)
+        super().__init__(repo_id, sample_size, chunk_size, split, cols)
         self.name = "crowdflower"
         self.generate_query()
         self.generate_document()
