@@ -1,4 +1,5 @@
 from adapters.core import BaseDataset
+from click import secho
 
 FEATURE_COLUMNS = [
     "query",
@@ -31,6 +32,7 @@ class AmazonDataset(BaseDataset):
     ):
         super().__init__(repo_id, sample_size, chunk_size, split, cols)
         self.name = "amazon"
+        self._data = self.load(split, cols)
         self._map_relevance()
         self.generate_query()
         self.generate_document()

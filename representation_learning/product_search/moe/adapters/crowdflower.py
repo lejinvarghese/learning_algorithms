@@ -21,6 +21,7 @@ class CrowdFlowerDataset(BaseDataset):
     ):
         super().__init__(repo_id, sample_size, chunk_size, split, cols)
         self.name = "crowdflower"
+        self._data = self.load(split, cols)
         self.generate_query()
         self.generate_document()
         self._map_relevance()

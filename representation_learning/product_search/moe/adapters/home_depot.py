@@ -5,6 +5,7 @@ class HomeDepotDataset(BaseDataset):
     def __init__(self, repo_id="bstds/home_depot", sample_size=None, chunk_size=1000, split="train"):
         super().__init__(repo_id, sample_size, chunk_size, split)
         self.name = "home_depot"
+        self._data = self.load(split)
         self.generate_query()
         self.generate_document()
 
