@@ -18,8 +18,7 @@ class BaseDataset(ABC):
         repo_id: str,
         sample_size: int = None,
         chunk_size: int = 1000,
-        split="train",
-        cols: list[str] = None,
+        split="train"
     ):
         self._repo_id = repo_id
         self._sample_size = sample_size

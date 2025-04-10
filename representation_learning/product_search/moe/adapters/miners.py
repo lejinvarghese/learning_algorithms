@@ -12,14 +12,14 @@ class HardNegativeMiner:
         self,
         dataset,
         bi_encoder_name="thenlper/gte-base",
-        # cross_encoder_name="Alibaba-NLP/gte-reranker-modernbert-base",
+        cross_encoder_name="Alibaba-NLP/gte-reranker-modernbert-base",
         max_score=0.8,
-        min_score=0.6,
+        min_score=0.5,
     ):
 
         self.dataset = dataset
-        self.bi_encoder = SentenceTransformer(bi_encoder_name, device=DEVICE)
-        # self.cross_encoder = CrossEncoder(cross_encoder_name, device=DEVICE, model_kwargs={"torch_dtype": "auto"})
+        self.bi_encoder = SentenceTransformer(bi_encoder_name, device="cuda")
+        self.cross_encoder = CrossEncoder(cross_encoder_name, device="cuda", model_kwargs={"torch_dtype": "auto"})
         self.max_score = max_score
         self.min_score = min_score
         self.num_procs = cpu_count() - 1
@@ -28,18 +28,18 @@ class HardNegativeMiner:
         dataset = mine_hard_negatives(
             dataset=self.dataset,
             model=self.bi_encoder,
-            # cross_encoder=self.cross_encoder,
+            cross_encoder=self.cross_encoder,
             anchor_column_name="anchor",
             positive_column_name="document",
             range_min=5,
-            range_max=10,
+            range_max=20,
             max_score=self.max_score,
             min_score=self.min_score,
             margin=0,
             num_negatives=5,
             sampling_strategy="random",
-            batch_size=16,
-            use_faiss=False,
+            batch_size=64,
+            use_faiss=True,
             use_multi_process=True
         )
         dataset = dataset.map(

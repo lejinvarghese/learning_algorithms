@@ -44,15 +44,10 @@ class GoogleDataset(BaseDataset):
             split = "in_domain"
         elif split == "test":
             split = "zero_shot"
-        streaming_data = load_dataset(self.repo_id, split=split, columns=cols, streaming=True)
-        if cols:
-            streaming_data = streaming_data.remove_columns(
-                [col for col in streaming_data.column_names if col not in cols]
-            )
-
-        examples = list(streaming_data)
+        data = load_dataset(self.repo_id, split=split, columns=cols, streaming=True)
+        examples = list(data)
         data = Dataset.from_dict({k: [example[k] for example in examples] for k in examples[0].keys()})
-        return data.shuffle(seed=RANDOM_STATE)
+        return data
 
     def generate_document(self):
         self._data = self._data.map(

@@ -3,7 +3,7 @@
 ```bash
 python3 processor.py --sample_size 1000
 python3 processor.py --sample_size 1000 --subset_name pairs
-python3 processor.py --sample_size 1000 --subset_name triplets
+python3 processor.py --subset_name triplets --chunk_size 10000 --chunk_suffix google
 ```
 
 

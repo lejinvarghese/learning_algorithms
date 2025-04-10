@@ -13,7 +13,7 @@ class DatasetAggregator:
         chunk_size: Optional[int] = None,
         splits: list[str] = ["train", "test"],
     ):
-        self.sources = [AmazonDataset, WayfairDataset, HomeDepotDataset, CrowdFlowerDataset ]
+        self.sources = [AmazonDataset, WayfairDataset, HomeDepotDataset, CrowdFlowerDataset]
         self.sources = [GoogleDataset]
         self.sample_size = sample_size
         self.chunk_size = chunk_size
@@ -35,7 +35,7 @@ class DatasetAggregator:
                     continue
             datasets[split] = dataset_splits
         return datasets
-    
+
     def identify_max_chunks(self) -> int:
         """Generate the maximum number of chunks for triplets."""
         max_chunks = 1
@@ -62,7 +62,7 @@ class DatasetAggregator:
                 splits[split] = combined_pairs
         self.subsets["pairs"] = splits
         return splits
-        
+
     def generate_triplets(self, chunk_index: int) -> Dataset:
         """Generate triplets from all datasets and concatenate them."""
 
@@ -88,14 +88,14 @@ class DatasetAggregator:
         subset_name: str = "pairs",
         chunk_index: Optional[int] = None,
         chunk_suffix: Optional[str] = None,
-        ) -> None:
+    ) -> None:
         """Push the dataset to HuggingFace Hub."""
         secho(f"Pushing the dataset to {repo_id}", fg=(229, 192, 123))
 
         if subset_name not in self.subsets:
             raise ValueError(f"Subset {subset_name} not found in the dataset.")
         subset = self.subsets[subset_name]
-        
+
         # Create a new dictionary instead of modifying the existing one
         if chunk_index:
             new_subset = {}
@@ -105,7 +105,7 @@ class DatasetAggregator:
                     name = f"{name}_{chunk_suffix}"
                 new_subset[name] = value
             subset = new_subset
-            
+
         DatasetDict(subset).push_to_hub(
             repo_id,
             private=private,
