@@ -1,0 +1,19 @@
+name: datasets
+
+resources:
+  cloud: gcp
+  accelerators: T4:1
+  instance_type: n1-standard-16
+
+
+num_nodes: 1
+
+workdir: .
+
+setup: |
+  pip install uv
+  uv pip install -r requirements.txt
+  uv pip install "faiss-gpu==1.7.2"
+
+run: |
+  python processor.py --sample_size 1000 --subset_name "triplets" --chunk_size 10000 --chunk_suffix "triplets"

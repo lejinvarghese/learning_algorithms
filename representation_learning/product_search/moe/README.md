@@ -51,3 +51,18 @@ python3 processor.py --subset_name triplets --chunk_size 10000 --chunk_suffix go
 | Google      | 19,564  | 748,386   | 981,204  |
 | Amazon      | 30,947  | 364,004   | 434,234  |
 | Wayfair     | 477     | 25,317    | 46,690   |
+
+
+## Remote
+
+```bash
+nano ~/.ssh/config
+```
+
+
+```bash
+sky launch datasets.yml \
+  --env HF_TOKEN=HF_TOKEN \
+  --dryrun \
+  --i 2
+```
