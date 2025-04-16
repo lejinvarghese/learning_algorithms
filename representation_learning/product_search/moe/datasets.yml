@@ -18,23 +18,4 @@ setup: |
   python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 
 run: |
-name: datasets
-
-resources:
-  cloud: gcp
-  accelerators: T4:1
-  instance_type: n1-standard-16
-  region: us-east1
-  zone: us-east1-d
-
-
-num_nodes: 1
-
-workdir: .
-
-setup: |
-  pip install uv
-  uv pip install -r requirements_linux.txt
-
-run: |
   python processor.py --sample_size 100000 --subset_name "triplets" --chunk_size 10000 --chunk_suffix "triplets"
