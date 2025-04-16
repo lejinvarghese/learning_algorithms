@@ -19,7 +19,7 @@ class CrowdFlowerDataset(BaseDataset):
         split="train",
         cols=FEATURE_COLUMNS,
     ):
-        super().__init__(repo_id, sample_size, chunk_size, split, cols)
+        super().__init__(repo_id, sample_size, chunk_size, split)
         self.name = "crowdflower"
         self._data = self.load(split, cols)
         self.generate_query()

@@ -3,7 +3,7 @@
 ```bash
 python3 processor.py --sample_size 1000
 python3 processor.py --sample_size 1000 --subset_name pairs
-python3 processor.py --subset_name triplets --chunk_size 10000 --chunk_suffix google
+python3 processor.py --sample_size 100000 --subset_name "triplets" --chunk_size 10000 --chunk_suffix "triplets"
 ```
 
 
@@ -63,6 +63,6 @@ nano ~/.ssh/config
 ```bash
 sky launch datasets.yml \
   --env HF_TOKEN=HF_TOKEN \
-  --dryrun \
-  --i 2
+  --idle-minutes-to-autostop 30 \
+  --down
 ```

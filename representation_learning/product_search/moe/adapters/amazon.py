@@ -30,7 +30,7 @@ class AmazonDataset(BaseDataset):
         split="train",
         cols=FEATURE_COLUMNS,
     ):
-        super().__init__(repo_id, sample_size, chunk_size, split, cols)
+        super().__init__(repo_id, sample_size, chunk_size, split)
         self.name = "amazon"
         self._data = self.load(split, cols)
         self._map_relevance()

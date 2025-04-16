@@ -21,7 +21,7 @@ class GoogleDataset(BaseDataset):
         split: str = "train",
         cols: list[str] = FEATURE_COLUMNS,
     ):
-        super().__init__(repo_id, sample_size, chunk_size, split, cols)
+        super().__init__(repo_id, sample_size, chunk_size, split)
         self.name = "google"
         self._data = self.load(split, cols)
         self.generate_query()
