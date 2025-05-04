@@ -2,8 +2,8 @@ name: datasets
 
 resources:
   cloud: gcp
-  accelerators: T4:1
-  instance_type: n1-standard-16
+  # accelerators: T4:1
+  instance_type: n1-highmem-16
   region: us-east1
   zone: us-east1-d
 
@@ -18,4 +18,4 @@ setup: |
   python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 
 run: |
-  python processor.py --sample_size 100000 --subset_name "triplets" --chunk_size 10000 --chunk_suffix "triplets"
+  python processor.py --sample_size 2_000_000 --chunk_size 100_000 --subset_name "triplets" --chunk_suffix "triplets"

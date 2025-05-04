@@ -2,6 +2,7 @@ from typing import Optional
 from click import secho
 from datasets import Dataset, DatasetDict, concatenate_datasets
 from adapters import AmazonDataset, BaseDataset, CrowdFlowerDataset, GoogleDataset, HomeDepotDataset, WayfairDataset
+import pandas as pd
 
 DATASET_NAME = "lv12/ProductSearchDataset"
 
@@ -65,19 +66,23 @@ class DatasetAggregator:
 
     def generate_triplets(self, chunk_index: int) -> Dataset:
         """Generate triplets from all datasets and concatenate them."""
-
         splits = {}
         for split in self.splits:
             dataset_splits = self.datasets.get(split, [])
             if len(dataset_splits) > 0:
                 triplets_list = []
                 for dataset in dataset_splits:
+                    # Generate triplets for this chunk
                     triplets = dataset.generate_triplets(chunk_index=chunk_index)
-                    triplets_list.append(triplets)
-
-                combined_triplets = concatenate_datasets(triplets_list)
-                secho(f"Total triplets: {len(combined_triplets)}", fg="blue")
-                splits[split] = combined_triplets
+                    if triplets is not None:  # Only append if we got valid triplets
+                        triplets_list.append(triplets)
+                
+                if triplets_list:
+                    # Combine all triplets for this split
+                    combined_triplets = concatenate_datasets(triplets_list)
+                    secho(f"Total triplets for {split}: {len(combined_triplets)}", fg="blue")
+                    splits[split] = combined_triplets
+                
         self.subsets["triplets"] = splits
         return splits
 
@@ -97,15 +102,16 @@ class DatasetAggregator:
         subset = self.subsets[subset_name]
 
         # Create a new dictionary instead of modifying the existing one
-        if chunk_index:
+        if chunk_index is not None:
             new_subset = {}
             for key, value in subset.items():
                 name = f"{key}_{chunk_index}"
                 if chunk_suffix:
-                    name = f"{name}_{chunk_suffix}"
+                    name = f"{name}_{chunk_suffix}_skip_1"
                 new_subset[name] = value
             subset = new_subset
 
+        # Push to hub
         DatasetDict(subset).push_to_hub(
             repo_id,
             private=private,
@@ -113,3 +119,8 @@ class DatasetAggregator:
         )
 
         secho(f"Successfully pushed the dataset to {repo_id}", fg="green")
+        
+        # Clear memory after pushing
+        del subset
+        import gc
+        gc.collect()

@@ -18,7 +18,7 @@ class HardNegativeMiner:
     ):
 
         self.dataset = dataset
-        self.bi_encoder = SentenceTransformer(bi_encoder_name, device="cuda")
+        self.bi_encoder = SentenceTransformer(bi_encoder_name, device="cpu")
         self.cross_encoder = CrossEncoder(cross_encoder_name, device="cuda", model_kwargs={"torch_dtype": "auto"})
         self.max_score = max_score
         self.min_score = min_score

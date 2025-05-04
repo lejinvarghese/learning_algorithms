@@ -5,9 +5,9 @@ from multiprocessing import cpu_count
 
 from click import secho
 import random
+import pandas as pd
 
 from datasets import Dataset, load_dataset, Features, Value
-from adapters.miners import HardNegativeMiner
 
 RANDOM_STATE = 42
 random.seed(RANDOM_STATE)
@@ -26,6 +26,8 @@ class BaseDataset(ABC):
         self._num_procs = cpu_count() - 1
         self._split = split
         self._data = None
+        self._cached_positives = None
+        self._cached_negatives = None
 
     @property
     def repo_id(self):
@@ -53,39 +55,12 @@ class BaseDataset(ABC):
         )
         self._unique_queries = list(set(self._data.unique("query")))
         self._n_queries = len(self._unique_queries)
-        secho(f"Unique queries before sampling: {self._n_queries}", fg="blue")
+        secho(f"Unique queries: {self._n_queries}", fg="blue")
         
-        if self._sample_size is not None and self._sample_size < self._n_queries:
-            secho(f"Sampling {self._sample_size} queries from {self._n_queries} total queries", fg="green")
-            sampled_queries = random.sample(self._unique_queries, self._sample_size)
-            self._unique_queries = sampled_queries
-            self._n_queries = len(self._unique_queries)
-            
-            self._data = self._data.filter(
-                lambda x: x["query"] in self._unique_queries,
-                num_proc=self._num_procs
-            )
-            secho(f"Filtered dataset to {len(self._data)} records with sampled queries", fg="green")
-        
-        # Create chunks for the queries
-        chunks = {}
-        if self._chunk_size is not None:
-            if self.name == "wayfair":
-                self._chunk_size = 100
-            elif self.name == "amazon":
-                self._chunk_size = 5000
-                
-            for i in range(0, self._n_queries, self._chunk_size):
-                chunk_index = i // self._chunk_size
-                chunks[chunk_index] = self._unique_queries[i:i + self._chunk_size]
-                secho(f"Chunk {chunk_index}: {len(chunks[chunk_index])} queries", fg="blue")
-        else:
-            chunks = {0: self._unique_queries}
-            secho(f"Single chunk with {len(chunks[0])} queries", fg="blue")
-
-        self._max_chunks = len(chunks.keys())
-        self._query_chunks = chunks
-        secho(f"Total chunks: {self._max_chunks}", fg="blue")
+        # Create a single chunk with all queries
+        self._query_chunks = {0: self._unique_queries}
+        self._max_chunks = 1
+        secho(f"Using single chunk with {len(self._unique_queries)} queries", fg="blue")
 
     def generate_document(self):
         pass
@@ -134,6 +109,7 @@ class BaseDataset(ABC):
 
     def generate_triplets(self, threshold=3.0, chunk_index: int = None):
         secho(f"Generating triplets for {self.name} dataset with threshold {threshold}", fg="blue")
+        
         positives = self.generate_positives(threshold=threshold).to_pandas()
         secho(f"Generated {len(positives)} positives for {self.name}", fg="blue")
         
@@ -150,35 +126,50 @@ class BaseDataset(ABC):
         if len(positives) == 0 or len(negatives) == 0:
             secho(f"Not enough data to generate triplets: {len(positives)} positives, {len(negatives)} negatives", fg="red")
             return Dataset.from_dict({
-                "anchor": [], 
-                "positive": [], 
-                "negative": [], 
-                "margin": [], 
-                "source": [],
-                "metadata": []
+                "anchor": [], "positive": [], "negative": [], 
+                "margin": [], "source": [], "metadata": []
             }, features=Features({
-                "anchor": Value("string"),
-                "positive": Value("string"),
-                "negative": Value("string"),
-                "margin": Value("float64"),
-                "source": Value("string"),
-                "metadata": Value("string")
+                "anchor": Value("string"), "positive": Value("string"), 
+                "negative": Value("string"), "margin": Value("float64"),
+                "source": Value("string"), "metadata": Value("string")
             }))
         
-        triplets = positives.merge(negatives, on="anchor", suffixes=("_positive", "_negative"))
-        secho(f"Merged into {len(triplets)} triplets for {self.name}", fg="blue")
+        if self.name == "google":
+            # Create a mapping of anchor to available negatives
+            neg_map = negatives.groupby("anchor")["negative"].apply(list).to_dict()
+            
+            # For each positive, get 5 random negatives from different anchors
+            def get_negatives(row):
+                anchor = row["anchor"]
+                # Get all negatives except those from the same anchor
+                available_negs = [neg for a, negs in neg_map.items() 
+                                if a != anchor 
+                                for neg in negs]
+                # Sample 5 random negatives
+                if len(available_negs) >= 5:
+                    return random.sample(available_negs, 5)
+                return available_negs
+            
+            # Apply the function to each row and explode the results
+            triplets = positives.copy()
+            triplets["negative"] = triplets.apply(get_negatives, axis=1)
+            triplets = triplets.explode("negative")
+            
+            # Add required columns
+            triplets["margin"] = 1.0
+            triplets["source"] = self.name
+        else:
+            triplets = positives.merge(negatives, on="anchor", suffixes=("_positive", "_negative"))
+            triplets["margin"] = round(triplets["relevance_positive"] - triplets["relevance_negative"], 2)
+            triplets["source"] = self.name
         
-        triplets["margin"] = round(triplets["relevance_positive"] - triplets["relevance_negative"], 2)
-        triplets["source"] = self.name
-
         include_cols = {"anchor", "positive", "negative", "margin", "source"}
         metadata_cols = [col for col in triplets.columns if col not in include_cols]
         triplets["metadata"] = triplets[metadata_cols].apply(lambda x: json.dumps(x.to_dict()), axis=1)
         triplets = triplets.drop(columns=metadata_cols)
-
+        
         triplets = Dataset.from_pandas(triplets, preserve_index=False)
         secho(f"Generated {len(triplets)} triplets for {self.name}.", fg="green")
-        # secho(f"Triplets sample: {triplets[0]}", fg=(229, 192, 123))
         return triplets
 
     def generate_positives(self, threshold):
@@ -187,22 +178,14 @@ class BaseDataset(ABC):
             num_proc=self._num_procs,
             remove_columns=["query", "document"],
         )
-        secho(f"Generated {len(pos)} positives.", fg="green")
+        secho(f"Generated {len(pos)} positives for {self.name}", fg="blue")
         return pos
 
     def generate_negatives(self, threshold):
-        if self.name == "google":
-            neg = self._data.map(
-                lambda x: {"anchor": x["query"]},
-                num_proc=self._num_procs,
-                remove_columns=["query"],
-            )
-            neg = HardNegativeMiner(dataset=neg, max_score=threshold).run()
-        else:
-            neg = self._data.filter(lambda x: x["relevance"] < threshold).map(
-                lambda x: {"anchor": x["query"], "negative": x["document"]},
-                num_proc=self._num_procs,
-                remove_columns=["query", "document"],
-            )
-        secho(f"Generated {len(neg)} negatives.", fg="green")
+        neg = self._data.filter(lambda x: x["relevance"] < threshold).map(
+            lambda x: {"anchor": x["query"], "negative": x["document"]},
+            num_proc=self._num_procs,
+            remove_columns=["query", "document"],
+        )
+        secho(f"Generated {len(neg)} negatives for {self.name}", fg="blue")
         return neg

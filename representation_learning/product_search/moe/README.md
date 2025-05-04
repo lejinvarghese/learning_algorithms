@@ -61,8 +61,8 @@ nano ~/.ssh/config
 
 
 ```bash
-sky launch datasets.yml \
-  --env HF_TOKEN=HF_TOKEN \
-  --idle-minutes-to-autostop 30 \
+sky launch -c datasets datasets.yml \
+  --env HF_TOKEN=$HF_TOKEN \
+  --idle-minutes-to-autostop 10 \
   --down
 ```
