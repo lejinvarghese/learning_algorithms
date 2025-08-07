@@ -1,0 +1,50 @@
+# Core ML Libraries
+torch>=2.0.1
+torchvision>=0.15.2
+torchaudio>=2.0.2
+transformers>=4.37.0
+diffusers>=0.27.0
+accelerate>=0.26.0
+
+# LoRA and PEFT
+peft>=0.8.0
+bitsandbytes>=0.42.0
+
+# Model and data handling
+safetensors>=0.4.0
+huggingface-hub>=0.20.0
+datasets>=2.16.0
+evaluate>=0.4.0
+
+# Image processing
+Pillow>=10.2.0
+opencv-python>=4.9.0
+
+# Async and HTTP for scraping
+aiohttp>=3.9.0
+aiofiles>=23.2.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+
+# Experiment tracking and logging
+wandb>=0.16.0
+tensorboard>=2.15.0
+
+# Utilities
+tqdm>=4.66.0
+pyyaml>=6.0.0
+numpy>=1.24.0
+scipy>=1.12.0
+
+# Memory optimization (optional but recommended)
+xformers>=0.0.23; sys_platform != "darwin"
+
+# Development and testing
+pytest>=7.4.0
+black>=23.0.0
+isort>=5.12.0
+flake8>=6.0.0
+
+# For Jupyter notebooks (optional)
+ipykernel>=6.25.0
+matplotlib>=3.7.0

@@ -1,0 +1,34 @@
+# SkyPilot configuration for LoRA training on GCP
+name: lora-personal-taste
+
+resources:
+  cloud: gcp
+  instance_type: n1-highmem-8
+  accelerators: V100:1  # or A100:1 for better performance
+  disk_size: 100
+  use_spot: true  # Cost savings
+
+# File mounts - sync local code
+file_mounts:
+  ~/lora-training: .
+
+# Setup - install dependencies
+setup: |
+  # Update system
+  sudo apt-get update -y
+  
+  # Install Python dependencies from requirements.txt
+  pip install --upgrade pip
+  pip install -r requirements.txt
+  
+  # Verify GPU
+  python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
+
+# Main run command
+run: |
+  cd ~/lora-training
+  
+  # Run the full pipeline (or just training if data exists)
+  python main.py --mode full --config config.yaml
+  
+  echo "Training completed! Results in outputs/"

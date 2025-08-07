@@ -1,0 +1,142 @@
+# LoRA Personal Taste Training Configuration
+# Edit this file with your specific settings
+
+# Project settings
+project_name: "my-personal-taste-lora"
+output_base_dir: "outputs"
+cache_dir: ".cache"
+seed: 42
+
+# DeviantArt scraping configuration
+deviantart:
+  # REQUIRED: Your DeviantArt favorites URL
+  favorites_url: "https://www.deviantart.com/YOUR_USERNAME/favourites"
+  
+  # REQUIRED: DeviantArt API credentials (get from https://www.deviantart.com/developers/)
+  client_id: "YOUR_CLIENT_ID"
+  client_secret: "YOUR_CLIENT_SECRET" 
+  
+  # Scraping settings
+  max_images: 200
+  rate_limit_delay: 1.0
+  retry_attempts: 3
+  image_quality: "original"  # original, fullview, preview
+  include_mature: false
+
+# Data processing configuration
+data:
+  train_data_dir: "data/train"
+  validation_data_dir: null
+  output_dir: "outputs"
+  
+  # Image processing
+  image_size: 1024          # 1024 for SD3.5/FLUX, 1024 for SDXL, 512 for SD1.5
+  center_crop: true
+  random_flip: true
+  convert_rgba: true
+  
+  # Bucketing for aspect ratios
+  enable_bucket: true
+  min_bucket_reso: 512
+  max_bucket_reso: 2048
+  bucket_reso_steps: 64
+  
+  # Captions and tags
+  use_blip_captions: true
+  use_wd14_tags: true
+  caption_extension: ".txt"
+  tag_threshold: 0.35
+  character_threshold: 0.35
+  
+  # Custom tags to add/remove
+  custom_tags: []
+  remove_tags: []
+
+# Model configuration
+model:
+  # Model selection (choose one)
+  model_type: "stabilityai/stable-diffusion-3.5-large"  # Recommended for artistic style
+  # model_type: "stabilityai/stable-diffusion-3.5-medium"
+  # model_type: "black-forest-labs/FLUX.1-dev" 
+  # model_type: "black-forest-labs/FLUX.1-schnell"
+  # model_type: "stabilityai/stable-diffusion-xl-base-1.0"
+  
+  model_path: null          # Override with local model path if needed
+  vae_path: null            # Custom VAE path (optional)
+  
+  # LoRA settings (2025 optimized)
+  lora_type: "LoRA"         # LoRA, LoCon, LoHa
+  lora_rank: 16             # 16 is a good balance
+  lora_alpha: 16.0          # Equal to rank for rsLoRA
+  lora_dropout: 0.1
+  use_rslora: true          # Enable rank-stabilized LoRA
+  
+  # Target modules (auto-selected based on model type)
+  target_modules:
+    - "to_q"
+    - "to_k" 
+    - "to_v"
+    - "to_out.0"
+    - "ff.net.0.proj"
+    - "ff.net.2"
+  
+  # Training precision
+  mixed_precision: "bf16"   # bf16 for modern GPUs, fp16 for older
+  gradient_checkpointing: true
+  xformers: true
+
+# Training configuration
+training:
+  # Basic settings
+  num_epochs: 3             # Conservative to prevent overfitting
+  batch_size: 1             # Start small, increase if you have VRAM
+  gradient_accumulation_steps: 4  # Effective batch size = 4
+  learning_rate: 0.00001    # 1e-5, good starting point
+  
+  # Learning rate scheduling
+  lr_scheduler: "cosine_with_restarts"
+  lr_warmup_steps: 100
+  lr_num_cycles: 1
+  
+  # Optimization
+  optimizer: "AdamW8bit"    # Memory efficient
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  
+  # Min-SNR weighting (2025 improvement)
+  min_snr_gamma: 5.0        # Reduces high-loss timestep impact
+  
+  # Regularization
+  noise_offset: 0.0
+  adaptive_noise_scale: 0.0
+  
+  # Saving and validation
+  save_every_n_epochs: 1
+  save_precision: "bf16"
+  save_model_as: "safetensors"
+  
+  # Logging and monitoring
+  logging_dir: "logs"
+  log_with: "wandb"         # wandb, tensorboard, or none
+  project_name: "lora-personal-taste"
+
+# Cloud deployment configuration (for SkyPilot)
+cloud:
+  cloud_provider: "gcp"     # gcp, aws, azure
+  instance_type: "n1-highmem-8"
+  accelerators: "V100:1"    # V100:1, A100:1, etc.
+  disk_size: 100            # GB
+  use_spot_instances: true  # Cost savings
+  
+  # Networking
+  ports:
+    - 6006                  # TensorBoard
+    - 7860                  # Gradio
+  
+  # Environment
+  docker_image: null
+  setup_commands: []
+  
+  # Auto-scaling
+  min_nodes: 1
+  max_nodes: 1
