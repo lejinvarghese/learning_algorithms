@@ -18,4 +18,5 @@ setup: |
   python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 
 run: |
-  python processor.py --sample_size 2_000_000 --chunk_size 100_000 --subset_name "triplets" --chunk_suffix "triplets"
+  # python processor.py --sample_size 2_000_000 --chunk_size 100_000 --subset_name "triplets" --chunk_suffix "triplets"
+  python deduplicator.py --num_partitions 5
