@@ -1,13 +1,9 @@
 """
 Simple DeviantArt scraper.
 """
-
-import os
-import time
 import asyncio
 import aiohttp
 from pathlib import Path
-from typing import List
 import logging
 
 from src.config import Config

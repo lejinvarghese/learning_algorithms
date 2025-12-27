@@ -134,3 +134,4 @@ dmypy.json
 *data/
 representation_learning/text/product_search/retrieval/models/
 models/
+.DS_Store

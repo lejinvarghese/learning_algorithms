@@ -66,3 +66,5 @@ sky launch -c datasets datasets.yml \
   --idle-minutes-to-autostop 10 \
   --down
 ```
+claude mcp add --transport stdio google-data-commons --env DC_API_KEY=t38ruvM5QWaPDphSPuUThqmvmDSGt3OmwIm029Ifz2ZAWpRa \
+  -- uvx datacommons-mcp serve stdio

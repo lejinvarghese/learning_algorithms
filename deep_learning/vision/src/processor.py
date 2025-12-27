@@ -1,13 +1,11 @@
 """
-Simple data processing pipeline.
+Data processing pipeline with aesthetic-focused captioning.
 """
 
 import os
-import asyncio
 from pathlib import Path
 from PIL import Image
 import logging
-from typing import List
 from transformers import BlipProcessor, BlipForConditionalGeneration
 import torch
 
@@ -16,16 +14,27 @@ from src.config import Config
 logger = logging.getLogger(__name__)
 
 
+# Aesthetic trigger words for style learning
+AESTHETIC_TRIGGERS = [
+    "aesthetic style",
+    "artistic composition",
+    "visual aesthetic",
+    "aesthetic artwork",
+    "stylized art"
+]
+
+
 class DataProcessor:
-    """Simple data processing for images and captions."""
-    
+    """Data processing for images with aesthetic-focused captions."""
+
     def __init__(self, config: Config):
         self.config = config
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        
+
         # Load BLIP for captioning
         self.blip_processor = None
         self.blip_model = None
+        self.caption_counter = 0
         
     def setup_captioning(self):
         """Setup BLIP for automatic captioning."""
@@ -61,12 +70,21 @@ class DataProcessor:
             output_path = output_dir / image_path.name
             image.save(output_path, "JPEG", quality=95)
             
-            # Generate caption if BLIP is available
+            # Generate aesthetic-focused caption
             if self.blip_model is not None:
-                caption = self._generate_caption(image)
-                caption_path = output_path.with_suffix(".txt")
-                with open(caption_path, 'w', encoding='utf-8') as f:
-                    f.write(caption)
+                base_caption = self._generate_caption(image)
+                # Add aesthetic trigger to help LoRA learn style
+                trigger = AESTHETIC_TRIGGERS[self.caption_counter % len(AESTHETIC_TRIGGERS)]
+                caption = f"{trigger}, {base_caption}"
+                self.caption_counter += 1
+            else:
+                # Simple trigger-only caption if no BLIP
+                caption = AESTHETIC_TRIGGERS[self.caption_counter % len(AESTHETIC_TRIGGERS)]
+                self.caption_counter += 1
+
+            caption_path = output_path.with_suffix(".txt")
+            with open(caption_path, 'w', encoding='utf-8') as f:
+                f.write(caption)
                     
             return True
             
@@ -110,8 +128,13 @@ class DataProcessor:
             return 0
             
         # Setup captioning if needed
-        if self.config.use_wandb:  # Reuse this flag for captioning
+        caption_mode = getattr(self.config, 'caption_mode', 'trigger')
+        if caption_mode == 'blip':
             self.setup_captioning()
+        elif caption_mode == 'trigger':
+            logger.info("Using aesthetic trigger words only (no BLIP)")
+        else:
+            logger.warning(f"Unknown caption_mode: {caption_mode}, defaulting to trigger-only")
             
         # Process images
         processed = 0

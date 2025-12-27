@@ -6,8 +6,7 @@ Simple main entry point for LoRA training.
 import asyncio
 import argparse
 import logging
-import os
-from pathlib import Path
+import oswa
 
 from src.config import Config
 from src.trainer import LoRATrainer
