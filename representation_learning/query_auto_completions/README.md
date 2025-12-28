@@ -1,67 +1,63 @@
-# Search Intention Network (SIN)
+# Query Auto-Completion with Search Intention Network
 
-Implementation of the Search Intention Network from "Search Intention Network for Personalized Query Auto-Completion in E-Commerce" (2024).
+Simplified implementation inspired by "Search Intention Network for Personalized Query Auto-Completion in E-Commerce" (2024).
 
 ## Architecture Overview
 
 ```
-Prefix Input → IE Module → Current Intention
-                              ↓
-Behavior Sequences → Multi-View Encoders → Historical Intentions
-                              ↓
-                    Candidate-to-History Attention (time decay)
-                              ↓
-                    IT Module → Final Intention → CTR Prediction
+Prefix Input → Embedding → CNN + Transformer → Prefix Intention
+                                                      ↓
+Candidate Input → Embedding → Transformer → Candidate Intention
+                                                      ↓
+                                        [Concat] → MLP → Match Score
 ```
+
+**Simplifications from original paper:**
+- Removed historical behavior sequences and intention transfer module
+- Focus on prefix-candidate matching using IE (Intention Equivocality) module
+- Uses ByT5 tokenizer with optional pretrained embeddings
 
 ## Key Components
 
-### 1. Intention Equivocality (IE) Module
-**Problem**: Short prefixes are ambiguous during typing  
-**Solution**: CNN extracts local patterns → Transformer distills intention
+### 1. Asymmetric Encoders
 
-- `CNNLocalEncoder`: 3 parallel 1D convolutions (filters: 3,4,5) + max pooling
-- `IntentionEquivocalityModule`: CNN + Transformer encoder
+**PrefixEncoder**: CNN + Transformer
+- Multi-scale 1D CNN (kernel sizes: 3, 4, 5) extracts local patterns
+- Transformer processes CNN output with pre-norm architecture
+- Captures character-level patterns in typed prefixes
 
-### 2. Multi-View Sequence Encoder
-**Purpose**: Encode different behavior types (searches, clicks, purchases)
+**CandidateEncoder**: Transformer only
+- Pure transformer with max-pooling
+- No CNN needed for complete queries
+- Processes full candidate sequences
 
-- Transformer encoder per behavior type
-- Positional encoding for temporal awareness
+### 2. ByT5 Tokenizer
+- Byte-level tokenization (259 vocab size)
+- Character-aware, handles typos and rare words
+- Optional pretrained embeddings from ByT5-small
 
-### 3. Candidate-to-History Attention
-**Purpose**: Weight historical items by relevance and recency
-
-- Scaled dot-product attention
-- Time-decaying weights (recent = higher weight)
-
-### 4. Intention Transfer (IT) Module
-**Problem**: Current intent may differ from historical preferences  
-**Solution**: Measure transfer via vector distance, balance intentions
-
-- Learns transfer score from [current, historical] concatenation
-- Weighted combination: low score → current dominates, high → historical dominates
-
-### 5. Search Intention Network (Main)
-Combines all components for CTR prediction
+### 3. Match Predictor
+- 3-layer MLP with GELU activation
+- LayerNorm + Dropout for stability
+- Outputs match probability (0-1)
 
 ## Usage
 
 ```python
-from model import SearchIntentionNetwork
+from model import QueryCompletionModel
 
-model = SearchIntentionNetwork(
-    vocab_size=10000,
-    embed_dim=128,
-    num_behaviors=3  # searches, clicks, purchases
+model = QueryCompletionModel(
+    vocab_size=259,  # ByT5 vocab size
+    embed_dim=256,
+    num_filters=64,
+    num_heads=4,
+    num_transformer_layers=2,
+    use_pretrained_embeddings=True,  # Use ByT5 pretrained embeddings
+    pretrained_model_name="google/byt5-small"
 )
 
-ctr_score, components = model(
-    prefix_ids=prefix_ids,
-    behavior_sequences=[search_seq, click_seq, purchase_seq],
-    behavior_masks=[mask1, mask2, mask3],
-    time_decays=[decay1, decay2, decay3]
-)
+# Forward pass
+score = model(prefix_ids, candidate_ids)  # Returns match probability
 ```
 
 ## Training

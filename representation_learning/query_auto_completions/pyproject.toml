@@ -9,5 +9,8 @@ dependencies = [
     "pytorch-lightning>=2.0.0",
     "datasets>=2.14.0",
     "click>=8.0.0",
-    "black>=24.10.0",
+    "tensorboard>=2.18.0",
+    "transformers>=4.30.0",
+    "sentencepiece>=0.1.99",
+    "black>=25.12.0",
 ]
