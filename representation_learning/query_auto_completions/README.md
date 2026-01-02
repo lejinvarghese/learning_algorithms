@@ -120,3 +120,89 @@ amazon/AmazonQAC ["prefixes", "final_search_term"]
 - `--max_val_samples`: Limit validation samples for testing (default: None)
 - `--val_ratio`: Validation split ratio (default: 0.1)
 - `--gpus`: Number of GPUs (default: 0 for CPU)
+
+---
+
+## Personalized Model (SIN with History)
+
+The personalized model extends the base architecture with:
+- **HistoricalIntentionReformulationEncoder**: Attention-based historical search encoding
+- **SearchIntentEvolutionInferencer**: Captures intent evolution from history to current prefix
+
+### Training Personalized Model
+
+```bash
+# With Apple Silicon MPS acceleration
+python train_personalized.py \
+  --dataset_path ./data/amazon_qac_processed_5m \
+  --batch_size 512 \
+  --mps
+
+# CPU training
+python train_personalized.py \
+  --dataset_path ./data/amazon_qac_processed_5m \
+  --batch_size 256 \
+  --num_workers 6
+```
+
+### Evaluating Personalized Model
+
+#### Without History (Non-personalized baseline)
+
+```bash
+python evaluate_personalized.py \
+  --checkpoint ./lightning_logs/sin_personalized/version_0/checkpoints/personalized-epoch=05-val_loss=0.4321.ckpt \
+  --prefix "arma" \
+  --candidates "armadillo,armageddon,armor,armani"
+```
+
+#### With History (Personalized)
+
+The model uses search history to personalize rankings:
+
+```bash
+# User with movie-related search history
+python evaluate_personalized.py \
+  --prefix "arma" \
+  --candidates "armadillo,armageddon,armor,armani" \
+  --history "alien vs predator,avengers,action movies"
+```
+
+Expected: "armageddon" (movie) ranks higher due to movie-related history.
+
+```bash
+# User with fashion-related search history
+python evaluate_personalized.py \
+  --prefix "arma" \
+  --candidates "armadillo,armageddon,armor,armani" \
+  --history "gucci bags,designer clothes,fashion brands"
+```
+
+Expected: "armani" (fashion brand) ranks higher due to fashion-related history.
+
+#### Programmatic Evaluation
+
+```python
+from evaluate_personalized import score_candidates_personalized, load_model_for_evaluation, build_tokenizer
+
+# Load model and tokenizer
+model = load_model_for_evaluation("path/to/checkpoint.ckpt")
+tokenizer = build_tokenizer()
+
+# Without history
+scores = score_candidates_personalized(
+    model=model,
+    prefix_text="arma",
+    candidate_texts=["armadillo", "armageddon", "armor"],
+    tokenizer=tokenizer,
+)
+
+# With history
+scores = score_candidates_personalized(
+    model=model,
+    prefix_text="arma",
+    candidate_texts=["armadillo", "armageddon", "armor"],
+    tokenizer=tokenizer,
+    history=["alien vs predator", "avengers"],
+)
+```

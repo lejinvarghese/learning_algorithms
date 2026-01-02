@@ -81,7 +81,13 @@ def build_tokenizer(tokenizer_name: str = "google/byt5-small"):
 
 
 @click.command()
-@click.option("--checkpoint", type=str, required=True, help="Path to model checkpoint")
+@click.option(
+    "--checkpoint",
+    default="./lightning_logs/sin_personalized/version_6/checkpoints/final.ckpt",
+    type=str,
+    required=True,
+    help="Path to model checkpoint",
+)
 @click.option("--prefix", type=str, default="arma", help="Prefix query to test")
 @click.option(
     "--candidates",
