@@ -4,7 +4,7 @@ Synthetic testbed (real playlists are alphabetized, so arcs must be studied
 where true order exists). Arc-bearing intent tokens shape the ground-truth
 ENERGY trajectory of a session:
 
-    workout -> ramp up      night -> wind down      party -> arch (mid peak)
+    workout -> ramp up      night -> wind down      dance -> arch (mid peak)
     chill   -> flat low     focus -> flat mid
 
 Queries are (genre, arc-token[, valence mood]); 15% of distinct combos are
@@ -34,7 +34,7 @@ L = 10
 ARCS = {
     "workout": lambda u: 0.30 + 0.60 * u,
     "night":   lambda u: 0.85 - 0.60 * u,
-    "party":   lambda u: 0.45 + 0.45 * math.sin(math.pi * u),
+    "dance":   lambda u: 0.45 + 0.45 * math.sin(math.pi * u),
     "chill":   lambda u: 0.25,
     "focus":   lambda u: 0.45,
 }
@@ -201,7 +201,7 @@ def main():
     # show one unseen-combo trajectory
     model.eval()
     z = model.songs(feats, edge_index)
-    combo = next(c for c in test_combos if c[1] in ("workout", "night", "party"))
+    combo = next(c for c in test_combos if c[1] in ("workout", "night", "dance"))
     toks = [w for w in combo if w]
     tk = pad_tokens([toks])
     te, tm, pl = model.query(tk)
