@@ -83,13 +83,16 @@ songs = sorted(good_songs)
 remap = {s: i for i, s in enumerate(songs)}
 t.iloc[songs].reset_index(drop=True).to_parquet("data/songs_real.parquet")
 
-n_out = 0
-with open("data/playlists_real.jsonl", "w") as f:
+n_out = n_all = 0
+with open("data/playlists_real.jsonl", "w") as f, \
+        open("data/playlists_all.jsonl", "w") as fa:
     for (user, name), tracks in kept.items():
+        ids = [remap[s] for s in tracks]
+        fa.write(json.dumps({"name": name, "track_ids": ids}) + "\n")
+        n_all += 1
         toks = [w for w in name_tokens(name) if w in vocab_set]
         if not toks:
             continue
-        f.write(json.dumps({"name": name, "tokens": toks,
-                            "track_ids": [remap[s] for s in tracks]}) + "\n")
+        f.write(json.dumps({"name": name, "tokens": toks, "track_ids": ids}) + "\n")
         n_out += 1
-print(f"wrote {n_out} (query, playlist) pairs, {len(songs)} songs")
+print(f"wrote {n_out} vocab-token pairs, {n_all} unfiltered pairs, {len(songs)} songs")
