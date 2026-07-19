@@ -103,7 +103,8 @@ class HybridDecoder(SparseNeighborDecoder):
         B, L = seqs.shape
         h = torch.tanh(self.init(pooled))
         inp = self.start.expand(B, -1)
-        last, all_logits, cov = None, [], torch.zeros(B, tok_emb.size(1))
+        last, all_logits, cov = None, [], torch.zeros(B, tok_emb.size(1),
+                                                      device=tok_emb.device)
         for t in range(L):
             h, logits, attn = self.step(h, inp, tok_emb, tok_mask, z, nbrs, last)
             all_logits.append(logits)
@@ -123,15 +124,17 @@ class HybridDecoder(SparseNeighborDecoder):
             h, logits, _ = self.step(h, inp, tok_emb, tok_mask, z, nbrs, last)
             logits = logits.squeeze(0)
             if seq:
-                logits[torch.tensor(seq)] = -1e9
+                picked = torch.tensor(seq, device=z.device)
+                logits[picked] = -1e9
                 if mmr > 0:                        # penalize similarity to picks
-                    sim = (zn @ zn[torch.tensor(seq)].t()).max(dim=1).values
-                    logits = logits - mmr * logits.abs().mean() * sim
+                    sim = (zn @ zn[picked].t()).max(dim=1).values
+                    scale = logits.topk(topk).values.std().clamp(min=1e-3)
+                    logits = logits - mmr * scale * sim
             kth = logits.topk(topk).values[-1]
             logits[logits < kth] = -1e9
             nxt = torch.multinomial(F.softmax(logits / temp, 0), 1).item()
             seq.append(nxt)
-            last = torch.tensor([nxt])
+            last = torch.tensor([nxt], device=z.device)
             inp = z[last]
         return seq
 
@@ -177,10 +180,12 @@ def coverage_loss(cov, mask):
 def run_epoch(model, opt, pairs, feats, edge_index, nbrs, cache, n2i, w2i,
               lex2id, cov_w, batch=64):
     model.train()
+    dev = feats.device
     random.shuffle(pairs)
     total, nb = 0.0, 0
     for i in range(0, len(pairs), batch):
-        emb, mask, lex, seqs = encode_batch(pairs[i:i + batch], cache, n2i, w2i, lex2id)
+        emb, mask, lex, seqs = (t.to(dev) for t in encode_batch(
+            pairs[i:i + batch], cache, n2i, w2i, lex2id))
         z = model.songs(feats, edge_index)
         tok, tmask, pooled = model.query(emb, mask, lex)
         logits, cov = model.dec(z, tok, tmask, pooled, nbrs, seqs)
@@ -199,10 +204,12 @@ def evaluate(model, pairs, feats, edge_index, nbrs, cache, n2i, w2i, lex2id,
              k=10, batch=256):
     """Returns (hit@k, unmet-intent rate: frac of real tokens with cov<0.2)."""
     model.eval()
+    dev = feats.device
     z = model.songs(feats, edge_index)
     hits = n = unmet = ntok = 0
     for i in range(0, len(pairs), batch):
-        emb, mask, lex, seqs = encode_batch(pairs[i:i + batch], cache, n2i, w2i, lex2id)
+        emb, mask, lex, seqs = (t.to(dev) for t in encode_batch(
+            pairs[i:i + batch], cache, n2i, w2i, lex2id))
         tok, tmask, pooled = model.query(emb, mask, lex)
         logits, cov = model.dec(z, tok, tmask, pooled, nbrs, seqs)
         topk = logits.topk(k, dim=-1).indices
@@ -220,10 +227,12 @@ def main():
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--lexical", action="store_true")
     ap.add_argument("--coverage", type=float, default=0.0)
+    ap.add_argument("--device", default="cpu")
     ap.add_argument("--out", default="data/model_text.pt")
     args = ap.parse_args()
     random.seed(args.seed)
     torch.manual_seed(args.seed)
+    dev = torch.device(args.device)
 
     songs, _, feats, _, _ = load_data()
     pairs = [json.loads(l) for l in open("data/playlists_all.jsonl")]
@@ -239,6 +248,8 @@ def main():
     n_test = len(pairs) // 10
     test, train = pairs[:n_test], pairs[n_test:]
     edge_index, nbrs = build_graph(train, len(songs))
+    feats, edge_index = feats.to(dev), edge_index.to(dev)
+    nbrs = [t.to(dev) for t in nbrs]
 
     lex_vocab = build_lex_vocab(train) if args.lexical else []
     lex2id = {w: i + 1 for i, w in enumerate(lex_vocab)}
@@ -246,7 +257,7 @@ def main():
           f"{len(train)} train / {len(test)} test, emb dim {emb_dim}, "
           f"lexical vocab {len(lex_vocab)}, coverage weight {args.coverage}")
 
-    model = TextPlaylistModel(feats.size(1), emb_dim, args.hidden, len(lex_vocab))
+    model = TextPlaylistModel(feats.size(1), emb_dim, args.hidden, len(lex_vocab)).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
     for ep in range(args.epochs):
         loss = run_epoch(model, opt, train, feats, edge_index, nbrs, cache,
