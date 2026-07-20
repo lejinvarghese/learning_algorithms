@@ -49,11 +49,12 @@ def main():
                     help="fix the RNG for reproducible sampling")
     ap.add_argument("--max-artist", type=int, default=2, dest="max_artist",
                     help="max songs per artist in a playlist (0 = unlimited)")
-    ap.add_argument("--genre-strength", type=float, default=2.5, dest="genre_strength",
-                    help="multiplier on the learned genre-match bias (needs --genrebias ckpt). "
-                         "Trained value (1.0) is too weak to separate thin/rare-artist genre "
-                         "intersections (e.g. rock vs pop Christmas); empirically 2.5 "
-                         "differentiates without abandoning the other query facets, 5+ overcorrects.")
+    ap.add_argument("--genre-strength", type=float, default=1.2, dest="genre_strength",
+                    help="decode-only additive bonus for songs matching an anchored query "
+                         "genre (needs --lexv2 ckpt; no training-time cost or parameter — see "
+                         "HybridDecoder docstring). Empirically ~1.2 differentiates genres "
+                         "(e.g. rock vs pop Christmas) without abandoning other query facets; "
+                         "2.5+ overcorrects. 0 disables.")
     ap.add_argument("queries", nargs="*")
     args = ap.parse_args()
     if args.seed is not None:
@@ -83,13 +84,17 @@ def main():
     model = TextPlaylistModel(feats.size(1), ckpt["emb_dim"], ckpt["hidden"],
                               len(lex_vocab), ckpt.get("n_artists", 0),
                               ckpt.get("layers", 0), lex_init,
-                              ckpt.get("steer", False), ckpt.get("genrebias", False),
-                              ckpt.get("gat", False))
-    model.load_state_dict(ckpt["model"])
+                              ckpt.get("steer", False), ckpt.get("gat", False))
+    missing, unexpected = model.load_state_dict(ckpt["model"], strict=False)
+    if unexpected:
+        print(f"[dim]ignoring old checkpoint params: {unexpected}[/dim]", file=sys.stderr)
     model.eval()
     enc = get_encoder()
+    # Decode-only genre bias (see HybridDecoder docstring): reconstructed
+    # from the checkpoint's genre vocabulary regardless of how it was
+    # trained, since it was never a trained parameter.
     song_genre_ids, n_genres = None, lexmap.get("n_genres", 0)
-    if ckpt.get("genrebias"):
+    if args.genre_strength and n_genres:
         genres = [v.split("genre:", 1)[1] for v in lex_vocab if v.startswith("genre:")]
         g2idx = {g: i for i, g in enumerate(genres)}
         song_genre_ids = torch.tensor(

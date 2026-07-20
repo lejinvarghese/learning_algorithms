@@ -64,16 +64,8 @@ def main():
     model = TextPlaylistModel(feats.size(1), ckpt["emb_dim"], ckpt["hidden"],
                               len(lex_vocab), ckpt.get("n_artists", 0),
                               ckpt.get("layers", 0), lex_init,
-                              ckpt.get("steer", False), ckpt.get("genrebias", False),
-                              ckpt.get("gat", False))
-    song_genre_ids = None
-    if ckpt.get("genrebias"):
-        lm = ckpt.get("lexmap", {})
-        genres = [v.split("genre:", 1)[1] for v in lex_vocab if v.startswith("genre:")]
-        g2idx = {g: i for i, g in enumerate(genres)}
-        song_genre_ids = torch.tensor(
-            [g2idx.get(g, 0) for g in songs["track_genre"].fillna(genres[0])])
-    model.load_state_dict(ckpt["model"])
+                              ckpt.get("steer", False), ckpt.get("gat", False))
+    model.load_state_dict(ckpt["model"], strict=False)
     model.eval()
 
     pop = Counter(s for p in train for s in p["track_ids"])
@@ -90,10 +82,9 @@ def main():
         z = model.song_z(feats, artist_ids, edge_index)
         for i in range(0, len(test), 256):
             chunk = test[i:i + 256]
-            emb, mask, lex, seqs, qgenre = encode_batch(chunk, cache, n2i, w2i, lex2id)
+            emb, mask, lex, seqs = encode_batch(chunk, cache, n2i, w2i, lex2id)
             tok, tmask, pooled = model.query(emb, mask, lex)
-            logits, _ = model.dec(z, tok, tmask, pooled, nbrs, seqs,
-                                  song_genre_ids, qgenre)
+            logits, _ = model.dec(z, tok, tmask, pooled, nbrs, seqs)
             tgt_logit = logits.gather(-1, seqs.unsqueeze(-1))
             rank = (logits > tgt_logit).sum(-1) + 1          # [B, L]
             top10 = logits.topk(10, -1).indices

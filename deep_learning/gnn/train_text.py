@@ -330,21 +330,23 @@ class HybridDecoder(SparseNeighborDecoder):
     TRAINED to move toward unserved intents, instead of policing them only
     via the loss.
 
-    Genre bias (--genrebias): a direct, learned additive bonus for songs
-    matching an anchored query genre — the same pattern as edge_bias for
-    graph neighbors. Rationale: a single genre anchor token competing inside
-    cross-attention against a whole-sentence embedding + up to 15 other
-    tokens can get attended (satisfying coverage) without ever winning
-    enough to reorder the output; an explicit channel guarantees genre
-    actually moves the ranking."""
+    Genre bias: a direct additive bonus for songs matching an anchored query
+    genre — same pattern as edge_bias for graph neighbors, so a single genre
+    anchor token can move the ranking instead of just getting attended
+    (satisfying coverage) without ever winning inside cross-attention.
+    Decode-only by design: trained as a learned scalar in an earlier
+    experiment, but it converged to ~4x weaker than edge_bias and moved
+    hit@10 by exactly zero — all the real effect came from manually scaling
+    it at generation time. So it carries no training-time parameter or
+    cost; `genre_strength` is a plain multiplier the caller sets at
+    inference (see infer_text.py's --genre-strength, empirically ~2.5)."""
 
-    def __init__(self, hid, steer=False, genrebias=False):
+    def __init__(self, hid, steer=False):
         super().__init__(hid)
         self.steer_lin = nn.Linear(hid, hid) if steer else None
-        self.genre_bias = nn.Parameter(torch.tensor(1.0)) if genrebias else None
 
     def step(self, h, inp, tok_emb, tok_mask, z, nbrs, last, cov=None,
-             song_genre_ids=None, qgenre=None, genre_strength=1.0):
+             song_genre_ids=None, qgenre=None, genre_strength=0.0):
         if self.steer_lin is not None and cov is not None:
             deficit = F.relu(COV_TAU - cov) * tok_mask.float()
             w = deficit / deficit.sum(1, keepdim=True).clamp(min=1e-6)
@@ -365,13 +367,14 @@ class HybridDecoder(SparseNeighborDecoder):
                 elif nb.numel():
                     bonus[b, nb] = 1.0
             logits = logits + self.edge_bias * bonus
-        if self.genre_bias is not None and song_genre_ids is not None and qgenre is not None:
+        if genre_strength and song_genre_ids is not None and qgenre is not None:
             hit = qgenre.gather(1, song_genre_ids.unsqueeze(0).expand(qgenre.size(0), -1))
-            logits = logits + self.genre_bias * genre_strength * hit
+            logits = logits + genre_strength * hit
         return h, logits, attn.squeeze(1)          # attn: [B, T]
 
-    def forward(self, z, tok_emb, tok_mask, pooled, nbrs, seqs,
-                song_genre_ids=None, qgenre=None):
+    def forward(self, z, tok_emb, tok_mask, pooled, nbrs, seqs):
+        """Training path: no genre bias here — it's decode-only (see class
+        docstring), so this never touches song_genre_ids/qgenre."""
         B, L = seqs.shape
         h = torch.tanh(self.init(pooled))
         inp = self.start.expand(B, -1)
@@ -379,7 +382,7 @@ class HybridDecoder(SparseNeighborDecoder):
                                                       device=tok_emb.device)
         for t in range(L):
             h, logits, attn = self.step(h, inp, tok_emb, tok_mask, z, nbrs,
-                                        last, cov, song_genre_ids, qgenre)
+                                        last, cov)
             all_logits.append(logits)
             cov = cov + attn
             last = seqs[:, t]
@@ -389,7 +392,7 @@ class HybridDecoder(SparseNeighborDecoder):
     @torch.no_grad()
     def generate(self, z, tok_emb, tok_mask, pooled, nbrs, length=SEQ_LEN,
                  temp=0.7, topk=20, mmr=0.0, artists=None, max_artist=0,
-                 song_genre_ids=None, qgenre=None, genre_strength=1.0):
+                 song_genre_ids=None, qgenre=None, genre_strength=0.0):
         zn = F.normalize(z, dim=-1)
         h = torch.tanh(self.init(pooled))
         inp = self.start.expand(1, -1)
@@ -428,8 +431,7 @@ class HybridDecoder(SparseNeighborDecoder):
 
 class TextPlaylistModel(nn.Module):
     def __init__(self, feat_dim, emb_dim, hid, lex_vocab=0, n_artists=0,
-                 layers=0, lex_init=None, steer=False, genrebias=False,
-                 gat=False):
+                 layers=0, lex_init=None, steer=False, gat=False):
         super().__init__()
         self.artist_emb = nn.Embedding(n_artists, ARTIST_DIM) if n_artists else None
         in_dim = feat_dim + (ARTIST_DIM if n_artists else 0)
@@ -440,7 +442,7 @@ class TextPlaylistModel(nn.Module):
         else:
             self.songs = SongEncoder(in_dim, hid)
         self.query = TextQueryEncoder(emb_dim, hid, lex_vocab, lex_init)
-        self.dec = HybridDecoder(hid, steer, genrebias)
+        self.dec = HybridDecoder(hid, steer)
 
     def song_z(self, feats, artist_ids, edge_index):
         x = feats
@@ -467,19 +469,13 @@ def query_embs_for(name, cache, n2i, w2i, lexmap):
 
 
 def encode_batch(chunk, cache, n2i, w2i, lexmap):
+    """Training/eval batch encoding. Genre bias is decode-only (see
+    HybridDecoder), so this does not build qgenre — infer_text.py builds it
+    independently for generation."""
     embs, masks, lexs = zip(*(query_embs_for(p["name"], cache, n2i, w2i, lexmap)
                               for p in chunk))
     seqs = torch.tensor([p["track_ids"][:SEQ_LEN] for p in chunk])
-    lexs = torch.stack(lexs)
-    qgenre = None
-    ag, ng = lexmap.get("anchor_genre"), lexmap.get("n_genres")
-    if ag:
-        qgenre = torch.zeros(len(chunk), ng)
-        for b in range(len(chunk)):
-            for aid in lexs[b].tolist():
-                if aid in ag:
-                    qgenre[b, ag[aid]] = 1.0
-    return torch.stack(embs), torch.stack(masks), lexs, seqs, qgenre
+    return torch.stack(embs), torch.stack(masks), torch.stack(lexs), seqs
 
 
 def coverage_loss(cov, mask):
@@ -530,16 +526,14 @@ def ndcg_at_10(logits, seqs):
 
 def run_epoch(model, opt, pairs, feats, edge_index, nbrs, cache, n2i, w2i,
               lex2id, cov_w, artist_ids=None, listwise=0.0, log_prior=None,
-              shuffle_p=0.0, song_genre_ids=None, batch=64):
+              shuffle_p=0.0, batch=64):
     model.train()
     dev = feats.device
     random.shuffle(pairs)
     total, nb = 0.0, 0
     for i in range(0, len(pairs), batch):
-        emb, mask, lex, seqs, qgenre = encode_batch(pairs[i:i + batch], cache, n2i, w2i, lex2id)
-        emb, mask, lex, seqs = emb.to(dev), mask.to(dev), lex.to(dev), seqs.to(dev)
-        if qgenre is not None:
-            qgenre = qgenre.to(dev)
+        emb, mask, lex, seqs = (t.to(dev) for t in encode_batch(
+            pairs[i:i + batch], cache, n2i, w2i, lex2id))
         if shuffle_p > 0:
             # RecSys'18 finding: random playlist subsets condition better than
             # sequential prefixes; playlist order here is alphabetical noise
@@ -549,8 +543,7 @@ def run_epoch(model, opt, pairs, feats, edge_index, nbrs, cache, n2i, w2i,
                     seqs[b] = seqs[b][torch.randperm(seqs.size(1), device=dev)]
         z = model.song_z(feats, artist_ids, edge_index)
         tok, tmask, pooled = model.query(emb, mask, lex)
-        logits, cov = model.dec(z, tok, tmask, pooled, nbrs, seqs,
-                                song_genre_ids, qgenre)
+        logits, cov = model.dec(z, tok, tmask, pooled, nbrs, seqs)
         # logit adjustment (Menon et al. 2021): add the popularity log-prior
         # during training only, so the model learns popularity-residual scores
         # and rare songs get larger margins; inference uses raw logits.
@@ -569,7 +562,7 @@ def run_epoch(model, opt, pairs, feats, edge_index, nbrs, cache, n2i, w2i,
 
 @torch.no_grad()
 def evaluate(model, pairs, feats, edge_index, nbrs, cache, n2i, w2i, lex2id,
-             artist_ids=None, song_genre_ids=None, k=10, batch=256):
+             artist_ids=None, k=10, batch=256):
     """Returns (hit@k, unmet-intent rate, ndcg@10 over the remaining set)."""
     model.eval()
     dev = feats.device
@@ -577,13 +570,10 @@ def evaluate(model, pairs, feats, edge_index, nbrs, cache, n2i, w2i, lex2id,
     hits = n = unmet = ntok = 0
     ndcg, nb = 0.0, 0
     for i in range(0, len(pairs), batch):
-        emb, mask, lex, seqs, qgenre = encode_batch(pairs[i:i + batch], cache, n2i, w2i, lex2id)
-        emb, mask, lex, seqs = emb.to(dev), mask.to(dev), lex.to(dev), seqs.to(dev)
-        if qgenre is not None:
-            qgenre = qgenre.to(dev)
+        emb, mask, lex, seqs = (t.to(dev) for t in encode_batch(
+            pairs[i:i + batch], cache, n2i, w2i, lex2id))
         tok, tmask, pooled = model.query(emb, mask, lex)
-        logits, cov = model.dec(z, tok, tmask, pooled, nbrs, seqs,
-                                song_genre_ids, qgenre)
+        logits, cov = model.dec(z, tok, tmask, pooled, nbrs, seqs)
         topk = logits.topk(k, dim=-1).indices
         hits += (topk == seqs.unsqueeze(-1)).any(-1).sum().item()
         n += seqs.numel()
@@ -618,8 +608,6 @@ def main():
                     help="learned coverage steering in the decoder")
     ap.add_argument("--shuffle", type=float, default=0.0,
                     help="prob of shuffling a training playlist's order per sample")
-    ap.add_argument("--genrebias", action="store_true",
-                    help="direct learned genre-match bias in the decoder (requires --lexv2)")
     ap.add_argument("--gat", action="store_true",
                     help="GATv2 song encoder (learned per-edge attention) instead of SAGE")
     ap.add_argument("--out", default="data/model_text.pt")
@@ -657,11 +645,13 @@ def main():
         nbrs = [t.to(dev) for t in nbrs]
     feats, edge_index = feats.to(dev), edge_index.to(dev)
 
-    lex_init, song_genre_ids, n_genres = None, None, 0
+    # song_genre_ids/anchor_genre/n_genres feed lexmap so infer_text.py can
+    # reconstruct the decode-only genre bias from the saved checkpoint;
+    # training itself never uses them (see HybridDecoder docstring).
+    lex_init, n_genres = None, 0
     if args.lexv2:
-        (lex_vocab, word2id, phrase2id, lex_init, song_genre_ids,
+        (lex_vocab, word2id, phrase2id, lex_init, _song_genre_ids,
          anchor_genre, n_genres) = build_lex_v2(train, cache, songs)
-        song_genre_ids = song_genre_ids.to(dev)
         lexmap = {"words": word2id, "phrases": phrase2id,
                   "anchor_genre": anchor_genre, "n_genres": n_genres}
     else:
@@ -671,8 +661,7 @@ def main():
     print(f"{len(songs)} songs, {edge_index.size(1)} edges (train-only), "
           f"{len(train)} train / {len(test)} test, emb dim {emb_dim}, "
           f"lexical vocab {len(lex_vocab)} (v2={args.lexv2}), "
-          f"steer={args.steer}, genrebias={args.genrebias}, "
-          f"coverage weight {args.coverage}")
+          f"steer={args.steer}, coverage weight {args.coverage}")
 
     if artist_ids is not None:
         artist_ids = artist_ids.to(dev)
@@ -684,15 +673,14 @@ def main():
         log_prior = (args.logitadj * torch.log(counts / counts.sum())).to(dev)
     model = TextPlaylistModel(feats.size(1), emb_dim, args.hidden,
                               len(lex_vocab), n_artists, args.layers,
-                              lex_init, args.steer, args.genrebias,
-                              args.gat).to(dev)
+                              lex_init, args.steer, args.gat).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
     for ep in range(args.epochs):
         loss = run_epoch(model, opt, train, feats, edge_index, nbrs, cache,
                          n2i, w2i, lexmap, args.coverage, artist_ids,
-                         args.listwise, log_prior, args.shuffle, song_genre_ids)
+                         args.listwise, log_prior, args.shuffle)
         hit, unmet, ndcg = evaluate(model, test, feats, edge_index, nbrs, cache,
-                                    n2i, w2i, lexmap, artist_ids, song_genre_ids)
+                                    n2i, w2i, lexmap, artist_ids)
         print(f"epoch {ep+1}: loss {loss:.3f}  test hit@10 {hit:.2%}  "
               f"ndcg@10 {ndcg:.3f}  unmet-intent rate {unmet:.1%}  "
               f"(random {10/len(songs):.2%})")
@@ -701,8 +689,7 @@ def main():
                 "hidden": args.hidden, "lex_vocab": lex_vocab,
                 "content": args.content, "n_artists": n_artists,
                 "layers": args.layers, "steer": args.steer, "gat": args.gat,
-                "genrebias": args.genrebias, "n_genres": n_genres,
-                "lexv2": args.lexv2,
+                "n_genres": n_genres, "lexv2": args.lexv2,
                 "lexmap": {"words": lexmap.get("words", {}),
                            "phrases": lexmap.get("phrases", {}),
                            "anchor_genre": lexmap.get("anchor_genre", {}),

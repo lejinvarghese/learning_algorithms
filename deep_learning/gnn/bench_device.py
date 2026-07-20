@@ -24,8 +24,7 @@ def bench(dev_name, feats, edge_index, nbrs, cache, n2i, w2i, lexmap, chunk,
     model = TextPlaylistModel(feats.size(1), cache["name_emb"].size(1),
                               hidden, len(lexmap["words"])).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
-    emb, mask, lex, seqs, _ = encode_batch(chunk, cache, n2i, w2i, lexmap)
-    emb, mask, lex, seqs = emb.to(dev), mask.to(dev), lex.to(dev), seqs.to(dev)
+    emb, mask, lex, seqs = (t.to(dev) for t in encode_batch(chunk, cache, n2i, w2i, lexmap))
     times = []
     for i in range(steps):
         t0 = time.perf_counter()
