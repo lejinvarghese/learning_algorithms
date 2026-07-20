@@ -334,7 +334,7 @@ class HybridDecoder(SparseNeighborDecoder):
 
     @torch.no_grad()
     def generate(self, z, tok_emb, tok_mask, pooled, nbrs, length=SEQ_LEN,
-                 temp=0.7, topk=20, mmr=0.0):
+                 temp=0.7, topk=20, mmr=0.0, artists=None, max_artist=0):
         zn = F.normalize(z, dim=-1)
         h = torch.tanh(self.init(pooled))
         inp = self.start.expand(1, -1)
@@ -348,6 +348,12 @@ class HybridDecoder(SparseNeighborDecoder):
             if seq:
                 picked = torch.tensor(seq, device=z.device)
                 logits[picked] = -1e9
+                if artists is not None and max_artist > 0:
+                    # DJ rule: no artist more than max_artist times
+                    cnt = Counter(artists[s].item() for s in seq)
+                    over = [a for a, c in cnt.items() if c >= max_artist]
+                    if over:
+                        logits[torch.isin(artists, torch.tensor(over, device=z.device))] = -1e9
                 if mmr > 0:                        # penalize similarity to picks
                     sim = (zn @ zn[picked].t()).max(dim=1).values
                     scale = logits.topk(topk).values.std().clamp(min=1e-3)
@@ -454,7 +460,7 @@ def ndcg_at_10(logits, seqs):
 
 def run_epoch(model, opt, pairs, feats, edge_index, nbrs, cache, n2i, w2i,
               lex2id, cov_w, artist_ids=None, listwise=0.0, log_prior=None,
-              batch=64):
+              shuffle_p=0.0, batch=64):
     model.train()
     dev = feats.device
     random.shuffle(pairs)
@@ -462,6 +468,13 @@ def run_epoch(model, opt, pairs, feats, edge_index, nbrs, cache, n2i, w2i,
     for i in range(0, len(pairs), batch):
         emb, mask, lex, seqs = (t.to(dev) for t in encode_batch(
             pairs[i:i + batch], cache, n2i, w2i, lex2id))
+        if shuffle_p > 0:
+            # RecSys'18 finding: random playlist subsets condition better than
+            # sequential prefixes; playlist order here is alphabetical noise
+            # anyway, so shuffling regularizes the adjacency-edge shortcut.
+            for b in range(seqs.size(0)):
+                if random.random() < shuffle_p:
+                    seqs[b] = seqs[b][torch.randperm(seqs.size(1), device=dev)]
         z = model.song_z(feats, artist_ids, edge_index)
         tok, tmask, pooled = model.query(emb, mask, lex)
         logits, cov = model.dec(z, tok, tmask, pooled, nbrs, seqs)
@@ -527,6 +540,8 @@ def main():
                     help="expanded ModernBERT-initialized anchor vocab + genre-phrase anchors")
     ap.add_argument("--steer", action="store_true",
                     help="learned coverage steering in the decoder")
+    ap.add_argument("--shuffle", type=float, default=0.0,
+                    help="prob of shuffling a training playlist's order per sample")
     ap.add_argument("--out", default="data/model_text.pt")
     args = ap.parse_args()
     random.seed(args.seed)
@@ -590,7 +605,7 @@ def main():
     for ep in range(args.epochs):
         loss = run_epoch(model, opt, train, feats, edge_index, nbrs, cache,
                          n2i, w2i, lexmap, args.coverage, artist_ids,
-                         args.listwise, log_prior)
+                         args.listwise, log_prior, args.shuffle)
         hit, unmet, ndcg = evaluate(model, test, feats, edge_index, nbrs, cache,
                                     n2i, w2i, lexmap, artist_ids)
         print(f"epoch {ep+1}: loss {loss:.3f}  test hit@10 {hit:.2%}  "

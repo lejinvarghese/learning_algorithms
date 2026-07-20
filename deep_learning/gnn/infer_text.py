@@ -47,6 +47,8 @@ def main():
                     help="sample among the top-k candidates per step")
     ap.add_argument("--seed", type=int, default=None,
                     help="fix the RNG for reproducible sampling")
+    ap.add_argument("--max-artist", type=int, default=2, dest="max_artist",
+                    help="max songs per artist in a playlist (0 = unlimited)")
     ap.add_argument("queries", nargs="*")
     args = ap.parse_args()
     if args.seed is not None:
@@ -64,11 +66,12 @@ def main():
     lexmap = ckpt.get("lexmap") or (
         {"words": {w: i + 1 for i, w in enumerate(lex_vocab)}, "phrases": {}}
         if lex_vocab else {})
+    fa = songs["artists"].fillna("").str.split(";").str[0].str.lower()
+    a2i = {a: i for i, a in enumerate(sorted(set(fa)))}
+    all_artist_ids = torch.tensor([a2i[a] for a in fa])
     artist_ids = None
     if ckpt.get("content"):
-        fa = songs["artists"].fillna("").str.split(";").str[0].str.lower()
-        a2i = {a: i for i, a in enumerate(sorted(set(fa)))}
-        artist_ids = torch.tensor([a2i[a] for a in fa])
+        artist_ids = all_artist_ids
         feats = torch.cat([feats, content_features(songs), build_title_cache(songs)], 1)
     lex_init = (torch.zeros(len(lex_vocab) + 1, ckpt["emb_dim"])
                 if ckpt.get("lexv2") else None)
@@ -98,7 +101,9 @@ def main():
         with torch.no_grad():
             seq = model.dec.generate(z, tok, tmask, pooled, nbrs,
                                      length=SEQ_LEN, temp=args.temp,
-                                     topk=args.topk, mmr=args.mmr)
+                                     topk=args.topk, mmr=args.mmr,
+                                     artists=all_artist_ids,
+                                     max_artist=args.max_artist)
         anchors = f"   lexical anchors: {lex_hits}" if lex_vocab else ""
         print(f"\n=== {q!r}{anchors}")
         for i, s in enumerate(seq):
