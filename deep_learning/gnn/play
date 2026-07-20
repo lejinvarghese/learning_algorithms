@@ -1,0 +1,6 @@
+#!/bin/zsh
+# Query the latest trained playlist model from the shell.
+#   ./play "chill acoustic morning" "metal love songs"   one-shot queries
+#   ./play                                               interactive REPL
+#   ./play --ckpt data/model_content.pt "query"          pin a checkpoint
+cd "$(dirname "$0")" && exec .venv/bin/python infer_text.py "$@"
