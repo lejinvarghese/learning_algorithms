@@ -49,7 +49,9 @@ def main():
 
     ckpt = torch.load(args.ckpt)
     lex_vocab = ckpt.get("lex_vocab", [])
-    lex2id = {w: i + 1 for i, w in enumerate(lex_vocab)}
+    lex2id = ckpt.get("lexmap") or (
+        {"words": {w: i + 1 for i, w in enumerate(lex_vocab)}, "phrases": {}}
+        if lex_vocab else {})
     artist_ids = None
     if ckpt.get("content"):
         from train_text import build_title_cache, content_features
@@ -57,9 +59,12 @@ def main():
         a2i = {a: i for i, a in enumerate(sorted(set(fa)))}
         artist_ids = torch.tensor([a2i[a] for a in fa])
         feats = torch.cat([feats, content_features(songs), build_title_cache(songs)], 1)
+    lex_init = (torch.zeros(len(lex_vocab) + 1, ckpt["emb_dim"])
+                if ckpt.get("lexv2") else None)
     model = TextPlaylistModel(feats.size(1), ckpt["emb_dim"], ckpt["hidden"],
                               len(lex_vocab), ckpt.get("n_artists", 0),
-                              ckpt.get("layers", 0))
+                              ckpt.get("layers", 0), lex_init,
+                              ckpt.get("steer", False))
     model.load_state_dict(ckpt["model"])
     model.eval()
 

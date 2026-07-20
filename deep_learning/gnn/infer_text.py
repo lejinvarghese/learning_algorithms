@@ -19,8 +19,8 @@ import torch
 
 from train_real import SEQ_LEN, build_graph, load_data
 from train_text import (MAX_LEX, MAX_WORDS, TextPlaylistModel,
-                        build_title_cache, content_features, get_encoder,
-                        words_of)
+                        build_title_cache, content_features, find_anchors,
+                        get_encoder, words_of)
 
 DEFAULT_QUERIES = [
     "punk songs for a christmas dinner",
@@ -61,16 +61,21 @@ def main():
 
     ckpt = torch.load(ckpt_path)
     lex_vocab = ckpt.get("lex_vocab", [])
-    lex2id = {w: i + 1 for i, w in enumerate(lex_vocab)}
+    lexmap = ckpt.get("lexmap") or (
+        {"words": {w: i + 1 for i, w in enumerate(lex_vocab)}, "phrases": {}}
+        if lex_vocab else {})
     artist_ids = None
     if ckpt.get("content"):
         fa = songs["artists"].fillna("").str.split(";").str[0].str.lower()
         a2i = {a: i for i, a in enumerate(sorted(set(fa)))}
         artist_ids = torch.tensor([a2i[a] for a in fa])
         feats = torch.cat([feats, content_features(songs), build_title_cache(songs)], 1)
+    lex_init = (torch.zeros(len(lex_vocab) + 1, ckpt["emb_dim"])
+                if ckpt.get("lexv2") else None)
     model = TextPlaylistModel(feats.size(1), ckpt["emb_dim"], ckpt["hidden"],
                               len(lex_vocab), ckpt.get("n_artists", 0),
-                              ckpt.get("layers", 0))
+                              ckpt.get("layers", 0), lex_init,
+                              ckpt.get("steer", False))
     model.load_state_dict(ckpt["model"])
     model.eval()
     enc = get_encoder()
@@ -85,8 +90,10 @@ def main():
         emb[0, :len(vecs)] = vecs
         mask[0, :len(vecs)] = True
         lex = torch.zeros(1, MAX_LEX, dtype=torch.long)
-        lex_hits = [w for w in words_of(q) if w in lex2id][:MAX_LEX]
-        lex[0, :len(lex_hits)] = torch.tensor([lex2id[w] for w in lex_hits])
+        hit_ids = find_anchors(q, lexmap)
+        lex_hits = [lex_vocab[i - 1] for i in hit_ids]
+        if hit_ids:
+            lex[0, :len(hit_ids)] = torch.tensor(hit_ids)
         tok, tmask, pooled = model.query(emb, mask, lex)
         with torch.no_grad():
             seq = model.dec.generate(z, tok, tmask, pooled, nbrs,

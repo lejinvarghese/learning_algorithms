@@ -28,11 +28,19 @@ from train_real import SEQ_LEN, SparseNeighborDecoder, build_graph, load_data
 
 EMB_MODEL = "Alibaba-NLP/gte-modernbert-base"
 MAX_WORDS = 7            # dense tokens = 1 sentence emb + up to 7 word embs
-MAX_LEX = 5              # exact-match lexical tokens per query
+MAX_LEX = 8              # exact-match lexical/genre anchors per query
 COV_TAU = 0.4            # min attention mass a real token should accumulate
 ARTIST_DIM = 32
 CACHE = "data/text_cache.pt"
 TITLE_CACHE = "data/title_cache.pt"
+GENRE_CACHE = "data/genre_cache.pt"
+
+LEX_STOP = set("""the and for with you your our from into this that all not out
+off are was were has have had can will its it's dont don't когда les des los
+las der die und mit von songs song music playlist playlists list mix tracks
+various artists artist album albums best top new old good great favourite
+favourites favorite favorites stuff misc random liked starred radio play
+spotify shazam soundrop iphone library""".split())
 
 
 def words_of(name):
@@ -130,6 +138,54 @@ def build_lex_vocab(train_pairs, min_freq=40, cap=300):
     return [w for w, c in cnt.most_common(cap) if c >= min_freq]
 
 
+def build_lex_v2(train_pairs, cache, songs, min_freq=10, cap=1500):
+    """Expanded anchor vocab: frequent name words (stopword-pruned) plus all
+    catalog genre labels as phrase anchors ('synth pop' -> genre synth-pop).
+    Embeddings are initialized from ModernBERT vectors and fine-tuned through
+    the shared dense projection — rare anchors start meaningful."""
+    cnt = Counter(w for p in train_pairs for w in set(words_of(p["name"])))
+    words = [w for w, c in cnt.most_common() if c >= min_freq
+             and w not in LEX_STOP][:cap]
+    genres = sorted(set(songs["track_genre"].dropna()))
+    gnorm = [" ".join(re.findall(r"[a-z0-9]+", g.lower())) for g in genres]
+    if os.path.exists(GENRE_CACHE):
+        genre_emb = torch.load(GENRE_CACHE)
+    else:
+        genre_emb = torch.tensor(get_encoder().encode(
+            [f"{g} music" for g in gnorm], normalize_embeddings=True))
+        torch.save(genre_emb, GENRE_CACHE)
+    wc = {w: i for i, w in enumerate(cache["words"])}
+    dim = cache["word_emb"].size(1)
+    init = torch.zeros(1 + len(words) + len(genres), dim)
+    word2id, phrase2id, vocab = {}, {}, []
+    for j, w in enumerate(words):
+        init[1 + j] = cache["word_emb"][wc[w]]
+        word2id[w] = 1 + j
+        vocab.append(w)
+    for k, g in enumerate(gnorm):
+        init[1 + len(words) + k] = genre_emb[k]
+        phrase2id[g] = 1 + len(words) + k
+        vocab.append(f"genre:{genres[k]}")
+    return vocab, word2id, phrase2id, init
+
+
+def find_anchors(name, lexmap):
+    """Anchor ids for a query: genre-phrase matches first, then word matches."""
+    if not lexmap:
+        return []
+    ws = words_of(name)
+    text = " " + " ".join(ws) + " "
+    ids = [pid for ph, pid in lexmap.get("phrases", {}).items()
+           if f" {ph} " in text]
+    ids += [lexmap["words"][w] for w in ws if w in lexmap["words"]]
+    seen, out = set(), []
+    for i in ids:
+        if i not in seen:
+            seen.add(i)
+            out.append(i)
+    return out[:MAX_LEX]
+
+
 def build_co_graph(pairs, n, window=4, min_count=2, topk=64):
     """Union graph: all adjacency edges (full bias weight 1.0) plus
     co-membership edges — songs within `window` positions in the same
@@ -199,26 +255,50 @@ class DeepSongEncoder(nn.Module):
 
 
 class TextQueryEncoder(nn.Module):
-    """Dense (frozen, projected) tokens + optional learned lexical tokens."""
+    """Dense (frozen, projected) tokens + learned lexical anchor tokens.
 
-    def __init__(self, in_dim, hid, lex_vocab=0):
+    v1 anchors: small random-init table at hidden size. v2 (lex_init given):
+    full-width table initialized from ModernBERT vectors, fine-tuned, and
+    passed through the SAME projection as the dense tokens."""
+
+    def __init__(self, in_dim, hid, lex_vocab=0, lex_init=None):
         super().__init__()
         self.proj = nn.Linear(in_dim, hid)
-        self.lex = nn.Embedding(lex_vocab + 1, hid, padding_idx=0) if lex_vocab else None
+        self.v2 = lex_init is not None
+        if self.v2:
+            self.lex = nn.Embedding.from_pretrained(lex_init.clone(),
+                                                    freeze=False, padding_idx=0)
+        else:
+            self.lex = nn.Embedding(lex_vocab + 1, hid, padding_idx=0) if lex_vocab else None
 
     def forward(self, emb, mask, lex_ids=None):
         tok = self.proj(emb)
         if self.lex is not None and lex_ids is not None:
-            tok = torch.cat([tok, self.lex(lex_ids)], 1)
+            ltok = self.lex(lex_ids)
+            if self.v2:
+                ltok = self.proj(ltok)
+            tok = torch.cat([tok, ltok], 1)
             mask = torch.cat([mask, lex_ids != 0], 1)
         pooled = (tok * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True).clamp(min=1)
         return tok, mask, pooled
 
 
 class HybridDecoder(SparseNeighborDecoder):
-    """Adds attention-coverage tracking and optional MMR-diverse generation."""
+    """Adds attention-coverage tracking, learned coverage steering, and
+    optional MMR-diverse generation. Steering (--steer): at each step the
+    under-attended query tokens form a deficit-weighted context vector fed
+    into the GRU input — the model is TRAINED to move toward unserved
+    intents, instead of policing them only via the loss."""
 
-    def step(self, h, inp, tok_emb, tok_mask, z, nbrs, last):
+    def __init__(self, hid, steer=False):
+        super().__init__(hid)
+        self.steer_lin = nn.Linear(hid, hid) if steer else None
+
+    def step(self, h, inp, tok_emb, tok_mask, z, nbrs, last, cov=None):
+        if self.steer_lin is not None and cov is not None:
+            deficit = F.relu(COV_TAU - cov) * tok_mask.float()
+            w = deficit / deficit.sum(1, keepdim=True).clamp(min=1e-6)
+            inp = inp + self.steer_lin((w.unsqueeze(1) @ tok_emb).squeeze(1))
         h = self.gru(inp, h)
         c, attn = self.attn(h.unsqueeze(1), tok_emb, tok_emb,
                             key_padding_mask=~tok_mask, need_weights=True)
@@ -244,7 +324,8 @@ class HybridDecoder(SparseNeighborDecoder):
         last, all_logits, cov = None, [], torch.zeros(B, tok_emb.size(1),
                                                       device=tok_emb.device)
         for t in range(L):
-            h, logits, attn = self.step(h, inp, tok_emb, tok_mask, z, nbrs, last)
+            h, logits, attn = self.step(h, inp, tok_emb, tok_mask, z, nbrs,
+                                        last, cov)
             all_logits.append(logits)
             cov = cov + attn
             last = seqs[:, t]
@@ -258,8 +339,11 @@ class HybridDecoder(SparseNeighborDecoder):
         h = torch.tanh(self.init(pooled))
         inp = self.start.expand(1, -1)
         seq, last = [], None
+        cov = torch.zeros(1, tok_emb.size(1), device=tok_emb.device)
         for _ in range(length):
-            h, logits, _ = self.step(h, inp, tok_emb, tok_mask, z, nbrs, last)
+            h, logits, attn = self.step(h, inp, tok_emb, tok_mask, z, nbrs,
+                                        last, cov)
+            cov = cov + attn
             logits = logits.squeeze(0)
             if seq:
                 picked = torch.tensor(seq, device=z.device)
@@ -281,14 +365,15 @@ class HybridDecoder(SparseNeighborDecoder):
 
 
 class TextPlaylistModel(nn.Module):
-    def __init__(self, feat_dim, emb_dim, hid, lex_vocab=0, n_artists=0, layers=0):
+    def __init__(self, feat_dim, emb_dim, hid, lex_vocab=0, n_artists=0,
+                 layers=0, lex_init=None, steer=False):
         super().__init__()
         self.artist_emb = nn.Embedding(n_artists, ARTIST_DIM) if n_artists else None
         in_dim = feat_dim + (ARTIST_DIM if n_artists else 0)
         self.songs = (DeepSongEncoder(in_dim, hid, layers) if layers
                       else SongEncoder(in_dim, hid))
-        self.query = TextQueryEncoder(emb_dim, hid, lex_vocab)
-        self.dec = HybridDecoder(hid)
+        self.query = TextQueryEncoder(emb_dim, hid, lex_vocab, lex_init)
+        self.dec = HybridDecoder(hid, steer)
 
     def song_z(self, feats, artist_ids, edge_index):
         x = feats
@@ -297,7 +382,7 @@ class TextPlaylistModel(nn.Module):
         return self.songs(x, edge_index)
 
 
-def query_embs_for(name, cache, n2i, w2i, lex2id):
+def query_embs_for(name, cache, n2i, w2i, lexmap):
     D = cache["name_emb"].size(1)
     emb = torch.zeros(1 + MAX_WORDS, D)
     mask = torch.zeros(1 + MAX_WORDS, dtype=torch.bool)
@@ -308,14 +393,14 @@ def query_embs_for(name, cache, n2i, w2i, lex2id):
         emb[1 + j] = cache["word_emb"][w2i[w]]
         mask[1 + j] = True
     lex = torch.zeros(MAX_LEX, dtype=torch.long)
-    if lex2id:
-        hits = [lex2id[w] for w in ws if w in lex2id][:MAX_LEX]
+    hits = find_anchors(name, lexmap)
+    if hits:
         lex[:len(hits)] = torch.tensor(hits)
     return emb, mask, lex
 
 
-def encode_batch(chunk, cache, n2i, w2i, lex2id):
-    embs, masks, lexs = zip(*(query_embs_for(p["name"], cache, n2i, w2i, lex2id)
+def encode_batch(chunk, cache, n2i, w2i, lexmap):
+    embs, masks, lexs = zip(*(query_embs_for(p["name"], cache, n2i, w2i, lexmap)
                               for p in chunk))
     seqs = torch.tensor([p["track_ids"][:SEQ_LEN] for p in chunk])
     return torch.stack(embs), torch.stack(masks), torch.stack(lexs), seqs
@@ -438,6 +523,10 @@ def main():
                     help="deep residual GNN with this many SAGE layers (0 = legacy 2-layer)")
     ap.add_argument("--logitadj", type=float, default=0.0,
                     help="tau for logit-adjusted softmax (popularity prior at train time)")
+    ap.add_argument("--lexv2", action="store_true",
+                    help="expanded ModernBERT-initialized anchor vocab + genre-phrase anchors")
+    ap.add_argument("--steer", action="store_true",
+                    help="learned coverage steering in the decoder")
     ap.add_argument("--out", default="data/model_text.pt")
     args = ap.parse_args()
     random.seed(args.seed)
@@ -473,11 +562,18 @@ def main():
         nbrs = [t.to(dev) for t in nbrs]
     feats, edge_index = feats.to(dev), edge_index.to(dev)
 
-    lex_vocab = build_lex_vocab(train) if args.lexical else []
-    lex2id = {w: i + 1 for i, w in enumerate(lex_vocab)}
+    lex_init = None
+    if args.lexv2:
+        lex_vocab, word2id, phrase2id, lex_init = build_lex_v2(train, cache, songs)
+        lexmap = {"words": word2id, "phrases": phrase2id}
+    else:
+        lex_vocab = build_lex_vocab(train) if args.lexical else []
+        lexmap = {"words": {w: i + 1 for i, w in enumerate(lex_vocab)},
+                  "phrases": {}} if lex_vocab else {}
     print(f"{len(songs)} songs, {edge_index.size(1)} edges (train-only), "
           f"{len(train)} train / {len(test)} test, emb dim {emb_dim}, "
-          f"lexical vocab {len(lex_vocab)}, coverage weight {args.coverage}")
+          f"lexical vocab {len(lex_vocab)} (v2={args.lexv2}), "
+          f"steer={args.steer}, coverage weight {args.coverage}")
 
     if artist_ids is not None:
         artist_ids = artist_ids.to(dev)
@@ -488,14 +584,15 @@ def main():
         counts = torch.tensor([pop.get(i, 0) + 1.0 for i in range(len(songs))])
         log_prior = (args.logitadj * torch.log(counts / counts.sum())).to(dev)
     model = TextPlaylistModel(feats.size(1), emb_dim, args.hidden,
-                              len(lex_vocab), n_artists, args.layers).to(dev)
+                              len(lex_vocab), n_artists, args.layers,
+                              lex_init, args.steer).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
     for ep in range(args.epochs):
         loss = run_epoch(model, opt, train, feats, edge_index, nbrs, cache,
-                         n2i, w2i, lex2id, args.coverage, artist_ids,
+                         n2i, w2i, lexmap, args.coverage, artist_ids,
                          args.listwise, log_prior)
         hit, unmet, ndcg = evaluate(model, test, feats, edge_index, nbrs, cache,
-                                    n2i, w2i, lex2id, artist_ids)
+                                    n2i, w2i, lexmap, artist_ids)
         print(f"epoch {ep+1}: loss {loss:.3f}  test hit@10 {hit:.2%}  "
               f"ndcg@10 {ndcg:.3f}  unmet-intent rate {unmet:.1%}  "
               f"(random {10/len(songs):.2%})")
@@ -503,7 +600,10 @@ def main():
     torch.save({"model": model.state_dict(), "emb_dim": emb_dim,
                 "hidden": args.hidden, "lex_vocab": lex_vocab,
                 "content": args.content, "n_artists": n_artists,
-                "layers": args.layers}, args.out)
+                "layers": args.layers, "steer": args.steer,
+                "lexv2": args.lexv2,
+                "lexmap": {"words": lexmap.get("words", {}),
+                           "phrases": lexmap.get("phrases", {})}}, args.out)
     print(f"saved {args.out}")
 
 
