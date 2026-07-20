@@ -268,9 +268,12 @@ class HybridDecoder(SparseNeighborDecoder):
                     sim = (zn @ zn[picked].t()).max(dim=1).values
                     scale = logits.topk(topk).values.std().clamp(min=1e-3)
                     logits = logits - mmr * scale * sim
-            kth = logits.topk(topk).values[-1]
-            logits[logits < kth] = -1e9
-            nxt = torch.multinomial(F.softmax(logits / temp, 0), 1).item()
+            if temp <= 0:                          # greedy: deterministic
+                nxt = logits.argmax().item()
+            else:
+                kth = logits.topk(topk).values[-1]
+                logits[logits < kth] = -1e9
+                nxt = torch.multinomial(F.softmax(logits / temp, 0), 1).item()
             seq.append(nxt)
             last = torch.tensor([nxt], device=z.device)
             inp = z[last]
@@ -365,7 +368,8 @@ def ndcg_at_10(logits, seqs):
 
 
 def run_epoch(model, opt, pairs, feats, edge_index, nbrs, cache, n2i, w2i,
-              lex2id, cov_w, artist_ids=None, listwise=0.0, batch=64):
+              lex2id, cov_w, artist_ids=None, listwise=0.0, log_prior=None,
+              batch=64):
     model.train()
     dev = feats.device
     random.shuffle(pairs)
@@ -376,7 +380,11 @@ def run_epoch(model, opt, pairs, feats, edge_index, nbrs, cache, n2i, w2i,
         z = model.song_z(feats, artist_ids, edge_index)
         tok, tmask, pooled = model.query(emb, mask, lex)
         logits, cov = model.dec(z, tok, tmask, pooled, nbrs, seqs)
-        ce = F.cross_entropy(logits.flatten(0, 1), seqs.flatten())
+        # logit adjustment (Menon et al. 2021): add the popularity log-prior
+        # during training only, so the model learns popularity-residual scores
+        # and rare songs get larger margins; inference uses raw logits.
+        train_logits = logits + log_prior if log_prior is not None else logits
+        ce = F.cross_entropy(train_logits.flatten(0, 1), seqs.flatten())
         loss = (1 - listwise) * ce + listwise * listwise_loss(logits, seqs) \
             if listwise > 0 else ce
         if cov_w > 0:
@@ -428,6 +436,8 @@ def main():
                     help="blend weight for position-discounted listwise set loss")
     ap.add_argument("--layers", type=int, default=0,
                     help="deep residual GNN with this many SAGE layers (0 = legacy 2-layer)")
+    ap.add_argument("--logitadj", type=float, default=0.0,
+                    help="tau for logit-adjusted softmax (popularity prior at train time)")
     ap.add_argument("--out", default="data/model_text.pt")
     args = ap.parse_args()
     random.seed(args.seed)
@@ -471,12 +481,19 @@ def main():
 
     if artist_ids is not None:
         artist_ids = artist_ids.to(dev)
+    log_prior = None
+    if args.logitadj > 0:
+        from collections import Counter as _C
+        pop = _C(s for p in train for s in p["track_ids"])
+        counts = torch.tensor([pop.get(i, 0) + 1.0 for i in range(len(songs))])
+        log_prior = (args.logitadj * torch.log(counts / counts.sum())).to(dev)
     model = TextPlaylistModel(feats.size(1), emb_dim, args.hidden,
                               len(lex_vocab), n_artists, args.layers).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
     for ep in range(args.epochs):
         loss = run_epoch(model, opt, train, feats, edge_index, nbrs, cache,
-                         n2i, w2i, lex2id, args.coverage, artist_ids, args.listwise)
+                         n2i, w2i, lex2id, args.coverage, artist_ids,
+                         args.listwise, log_prior)
         hit, unmet, ndcg = evaluate(model, test, feats, edge_index, nbrs, cache,
                                     n2i, w2i, lex2id, artist_ids)
         print(f"epoch {ep+1}: loss {loss:.3f}  test hit@10 {hit:.2%}  "

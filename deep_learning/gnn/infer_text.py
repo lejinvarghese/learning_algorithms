@@ -13,6 +13,7 @@ import glob
 import json
 import os
 import sys
+from rich import print
 
 import torch
 
@@ -40,8 +41,16 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ckpt", default=None)
     ap.add_argument("--mmr", type=float, default=0.5)
+    ap.add_argument("--temp", type=float, default=0.7,
+                    help="sampling temperature; 0 = deterministic greedy")
+    ap.add_argument("--topk", type=int, default=20,
+                    help="sample among the top-k candidates per step")
+    ap.add_argument("--seed", type=int, default=None,
+                    help="fix the RNG for reproducible sampling")
     ap.add_argument("queries", nargs="*")
     args = ap.parse_args()
+    if args.seed is not None:
+        torch.manual_seed(args.seed)
     ckpt_path = args.ckpt or latest_ckpt()
     print(f"model: {ckpt_path}", file=sys.stderr)
 
@@ -81,23 +90,26 @@ def main():
         tok, tmask, pooled = model.query(emb, mask, lex)
         with torch.no_grad():
             seq = model.dec.generate(z, tok, tmask, pooled, nbrs,
-                                     length=SEQ_LEN, mmr=args.mmr)
+                                     length=SEQ_LEN, temp=args.temp,
+                                     topk=args.topk, mmr=args.mmr)
         anchors = f"   lexical anchors: {lex_hits}" if lex_vocab else ""
         print(f"\n=== {q!r}{anchors}")
         for i, s in enumerate(seq):
             r = songs.iloc[s]
-            print(f"  {i+1:>2}  {r['artists'].split(';')[0][:22]:<22} - "
-                  f"{r['track_name'][:36]:<36} [{r['track_genre']}] "
-                  f"en={r['energy']:.2f} va={r['valence']:.2f} ac={r['acousticness']:.2f}")
+            print(f"[green]{i+1:>2}  {str.lower(r['artists'].split(';')[0])[:22]:<22} - "
+                  f"[cyan]{str.lower(r['track_name'])[:36]:<36} [{r['track_genre']}] [/cyan]"
+                  f"[cyan]en={r['energy']:.2f} va={r['valence']:.2f} ac={r['acousticness']:.2f}[/cyan]")
 
     if args.queries:
         for q in args.queries:
             run_query(q)
     elif sys.stdin.isatty():
-        print("interactive mode — type a query, empty line or Ctrl-D to quit")
+        from rich.console import Console
+        console = Console()
+        print("[yellow]interactive mode — type a query, empty line or Ctrl-D to quit[/yellow]")
         while True:
             try:
-                q = input("\nquery> ").strip()
+                q = console.input("\n[yellow]query> [/yellow]").strip()
             except (EOFError, KeyboardInterrupt):
                 break
             if not q:

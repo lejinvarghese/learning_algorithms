@@ -3,3 +3,4 @@ torch_geometric
 pandas
 pyarrow
 sentence-transformers
+rich
