@@ -49,6 +49,11 @@ def main():
                     help="fix the RNG for reproducible sampling")
     ap.add_argument("--max-artist", type=int, default=2, dest="max_artist",
                     help="max songs per artist in a playlist (0 = unlimited)")
+    ap.add_argument("--genre-strength", type=float, default=2.5, dest="genre_strength",
+                    help="multiplier on the learned genre-match bias (needs --genrebias ckpt). "
+                         "Trained value (1.0) is too weak to separate thin/rare-artist genre "
+                         "intersections (e.g. rock vs pop Christmas); empirically 2.5 "
+                         "differentiates without abandoning the other query facets, 5+ overcorrects.")
     ap.add_argument("queries", nargs="*")
     args = ap.parse_args()
     if args.seed is not None:
@@ -118,7 +123,8 @@ def main():
                                      topk=args.topk, mmr=args.mmr,
                                      artists=all_artist_ids,
                                      max_artist=args.max_artist,
-                                     song_genre_ids=song_genre_ids, qgenre=qgenre)
+                                     song_genre_ids=song_genre_ids, qgenre=qgenre,
+                                     genre_strength=args.genre_strength)
         anchors = f"   lexical anchors: {lex_hits}" if lex_vocab else ""
         print(f"\n=== {q!r}{anchors}")
         for i, s in enumerate(seq):

@@ -344,7 +344,7 @@ class HybridDecoder(SparseNeighborDecoder):
         self.genre_bias = nn.Parameter(torch.tensor(1.0)) if genrebias else None
 
     def step(self, h, inp, tok_emb, tok_mask, z, nbrs, last, cov=None,
-             song_genre_ids=None, qgenre=None):
+             song_genre_ids=None, qgenre=None, genre_strength=1.0):
         if self.steer_lin is not None and cov is not None:
             deficit = F.relu(COV_TAU - cov) * tok_mask.float()
             w = deficit / deficit.sum(1, keepdim=True).clamp(min=1e-6)
@@ -367,7 +367,7 @@ class HybridDecoder(SparseNeighborDecoder):
             logits = logits + self.edge_bias * bonus
         if self.genre_bias is not None and song_genre_ids is not None and qgenre is not None:
             hit = qgenre.gather(1, song_genre_ids.unsqueeze(0).expand(qgenre.size(0), -1))
-            logits = logits + self.genre_bias * hit
+            logits = logits + self.genre_bias * genre_strength * hit
         return h, logits, attn.squeeze(1)          # attn: [B, T]
 
     def forward(self, z, tok_emb, tok_mask, pooled, nbrs, seqs,
@@ -389,7 +389,7 @@ class HybridDecoder(SparseNeighborDecoder):
     @torch.no_grad()
     def generate(self, z, tok_emb, tok_mask, pooled, nbrs, length=SEQ_LEN,
                  temp=0.7, topk=20, mmr=0.0, artists=None, max_artist=0,
-                 song_genre_ids=None, qgenre=None):
+                 song_genre_ids=None, qgenre=None, genre_strength=1.0):
         zn = F.normalize(z, dim=-1)
         h = torch.tanh(self.init(pooled))
         inp = self.start.expand(1, -1)
@@ -397,7 +397,8 @@ class HybridDecoder(SparseNeighborDecoder):
         cov = torch.zeros(1, tok_emb.size(1), device=tok_emb.device)
         for _ in range(length):
             h, logits, attn = self.step(h, inp, tok_emb, tok_mask, z, nbrs,
-                                        last, cov, song_genre_ids, qgenre)
+                                        last, cov, song_genre_ids, qgenre,
+                                        genre_strength)
             cov = cov + attn
             logits = logits.squeeze(0)
             if seq:
