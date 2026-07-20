@@ -676,6 +676,9 @@ def main():
                          "cluster-ID training loss")
     ap.add_argument("--aux-weight", type=float, default=0.3, dest="aux_weight",
                     help="loss weight for the auxiliary cluster prediction heads")
+    ap.add_argument("--lr", type=float, default=1e-3)
+    ap.add_argument("--lr-decay", action="store_true", dest="lr_decay",
+                    help="cosine anneal lr from --lr down to 2%% of it over all epochs")
     ap.add_argument("--out", default="data/model_text.pt")
     args = ap.parse_args()
     random.seed(args.seed)
@@ -753,7 +756,11 @@ def main():
     model = TextPlaylistModel(feats.size(1), emb_dim, args.hidden,
                               len(lex_vocab), n_artists, args.layers,
                               lex_init, args.steer, args.gat, aux_dims).to(dev)
-    opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+    opt = torch.optim.Adam(model.parameters(), lr=args.lr)
+    sched = (torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs,
+                                                        eta_min=args.lr * 0.02)
+             if args.lr_decay else None)
+    best_hit = 0.0
     for ep in range(args.epochs):
         loss = run_epoch(model, opt, train, feats, edge_index, nbrs, cache,
                          n2i, w2i, lexmap, args.coverage, artist_ids,
@@ -761,9 +768,14 @@ def main():
                          cluster_ids, args.aux_weight)
         hit, unmet, ndcg = evaluate(model, test, feats, edge_index, nbrs, cache,
                                     n2i, w2i, lexmap, artist_ids)
+        best_hit = max(best_hit, hit)
+        cur_lr = opt.param_groups[0]["lr"]
         print(f"epoch {ep+1}: loss {loss:.3f}  test hit@10 {hit:.2%}  "
               f"ndcg@10 {ndcg:.3f}  unmet-intent rate {unmet:.1%}  "
+              f"lr {cur_lr:.2e}  best {best_hit:.2%}  "
               f"(random {10/len(songs):.2%})")
+        if sched is not None:
+            sched.step()
 
     torch.save({"model": model.state_dict(), "emb_dim": emb_dim,
                 "hidden": args.hidden, "lex_vocab": lex_vocab,
