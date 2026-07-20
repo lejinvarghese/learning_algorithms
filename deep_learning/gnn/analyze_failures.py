@@ -50,8 +50,16 @@ def main():
     ckpt = torch.load(args.ckpt)
     lex_vocab = ckpt.get("lex_vocab", [])
     lex2id = {w: i + 1 for i, w in enumerate(lex_vocab)}
+    artist_ids = None
+    if ckpt.get("content"):
+        from train_text import build_title_cache, content_features
+        fa = songs["artists"].fillna("").str.split(";").str[0].str.lower()
+        a2i = {a: i for i, a in enumerate(sorted(set(fa)))}
+        artist_ids = torch.tensor([a2i[a] for a in fa])
+        feats = torch.cat([feats, content_features(songs), build_title_cache(songs)], 1)
     model = TextPlaylistModel(feats.size(1), ckpt["emb_dim"], ckpt["hidden"],
-                              len(lex_vocab))
+                              len(lex_vocab), ckpt.get("n_artists", 0),
+                              ckpt.get("layers", 0))
     model.load_state_dict(ckpt["model"])
     model.eval()
 
@@ -66,7 +74,7 @@ def main():
     rows = []          # one dict per (playlist, position)
     examples = []
     with torch.no_grad():
-        z = model.songs(feats, edge_index)
+        z = model.song_z(feats, artist_ids, edge_index)
         for i in range(0, len(test), 256):
             chunk = test[i:i + 256]
             emb, mask, lex, seqs = encode_batch(chunk, cache, n2i, w2i, lex2id)
