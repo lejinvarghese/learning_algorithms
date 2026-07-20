@@ -261,6 +261,37 @@ class DeepSongEncoder(nn.Module):
         return self.head(h)
 
 
+class GATSongEncoder(nn.Module):
+    """N direction-aware GATv2 layers with residuals + LayerNorm. Unlike
+    SAGEConv (uniform mean-pool over neighbors), each edge gets a LEARNED
+    attention weight from content compatibility — a song with a noisy or
+    oversized neighborhood (a co-listen hub spanning many unrelated
+    playlists) can down-weight irrelevant neighbors instead of being
+    smeared across all of them equally. Complementary to, not a
+    replacement for, structural (PPR/edge-count) reweighting."""
+
+    def __init__(self, in_dim, hid, layers=3, heads=4):
+        super().__init__()
+        from torch_geometric.nn import GATv2Conv
+        self.inp = nn.Linear(in_dim, hid)
+        self.fwd = nn.ModuleList(
+            GATv2Conv(hid, hid // heads, heads=heads) for _ in range(layers))
+        self.bwd = nn.ModuleList(
+            GATv2Conv(hid, hid // heads, heads=heads) for _ in range(layers))
+        self.mix = nn.ModuleList(nn.Linear(2 * hid, hid) for _ in range(layers))
+        self.norm = nn.ModuleList(nn.LayerNorm(hid) for _ in range(layers))
+        self.head = nn.Sequential(nn.Linear(hid, hid), nn.ReLU(),
+                                  nn.Linear(hid, hid))
+
+    def forward(self, x, edge_index):
+        rev = edge_index.flip(0)
+        h = F.relu(self.inp(x))
+        for f, b, m, n in zip(self.fwd, self.bwd, self.mix, self.norm):
+            u = m(torch.cat([f(h, edge_index), b(h, rev)], -1))
+            h = n(h + F.relu(u))
+        return self.head(h)
+
+
 class TextQueryEncoder(nn.Module):
     """Dense (frozen, projected) tokens + learned lexical anchor tokens.
 
@@ -396,12 +427,17 @@ class HybridDecoder(SparseNeighborDecoder):
 
 class TextPlaylistModel(nn.Module):
     def __init__(self, feat_dim, emb_dim, hid, lex_vocab=0, n_artists=0,
-                 layers=0, lex_init=None, steer=False, genrebias=False):
+                 layers=0, lex_init=None, steer=False, genrebias=False,
+                 gat=False):
         super().__init__()
         self.artist_emb = nn.Embedding(n_artists, ARTIST_DIM) if n_artists else None
         in_dim = feat_dim + (ARTIST_DIM if n_artists else 0)
-        self.songs = (DeepSongEncoder(in_dim, hid, layers) if layers
-                      else SongEncoder(in_dim, hid))
+        if gat:
+            self.songs = GATSongEncoder(in_dim, hid, layers or 3)
+        elif layers:
+            self.songs = DeepSongEncoder(in_dim, hid, layers)
+        else:
+            self.songs = SongEncoder(in_dim, hid)
         self.query = TextQueryEncoder(emb_dim, hid, lex_vocab, lex_init)
         self.dec = HybridDecoder(hid, steer, genrebias)
 
@@ -583,6 +619,8 @@ def main():
                     help="prob of shuffling a training playlist's order per sample")
     ap.add_argument("--genrebias", action="store_true",
                     help="direct learned genre-match bias in the decoder (requires --lexv2)")
+    ap.add_argument("--gat", action="store_true",
+                    help="GATv2 song encoder (learned per-edge attention) instead of SAGE")
     ap.add_argument("--out", default="data/model_text.pt")
     args = ap.parse_args()
     random.seed(args.seed)
@@ -645,7 +683,8 @@ def main():
         log_prior = (args.logitadj * torch.log(counts / counts.sum())).to(dev)
     model = TextPlaylistModel(feats.size(1), emb_dim, args.hidden,
                               len(lex_vocab), n_artists, args.layers,
-                              lex_init, args.steer, args.genrebias).to(dev)
+                              lex_init, args.steer, args.genrebias,
+                              args.gat).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
     for ep in range(args.epochs):
         loss = run_epoch(model, opt, train, feats, edge_index, nbrs, cache,
@@ -660,7 +699,7 @@ def main():
     torch.save({"model": model.state_dict(), "emb_dim": emb_dim,
                 "hidden": args.hidden, "lex_vocab": lex_vocab,
                 "content": args.content, "n_artists": n_artists,
-                "layers": args.layers, "steer": args.steer,
+                "layers": args.layers, "steer": args.steer, "gat": args.gat,
                 "genrebias": args.genrebias, "n_genres": n_genres,
                 "lexv2": args.lexv2,
                 "lexmap": {"words": lexmap.get("words", {}),

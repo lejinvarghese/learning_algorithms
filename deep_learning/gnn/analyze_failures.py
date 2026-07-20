@@ -64,7 +64,8 @@ def main():
     model = TextPlaylistModel(feats.size(1), ckpt["emb_dim"], ckpt["hidden"],
                               len(lex_vocab), ckpt.get("n_artists", 0),
                               ckpt.get("layers", 0), lex_init,
-                              ckpt.get("steer", False), ckpt.get("genrebias", False))
+                              ckpt.get("steer", False), ckpt.get("genrebias", False),
+                              ckpt.get("gat", False))
     song_genre_ids = None
     if ckpt.get("genrebias"):
         lm = ckpt.get("lexmap", {})
