@@ -19,6 +19,7 @@ import random
 import re
 from collections import Counter
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -131,6 +132,43 @@ def build_title_cache(songs):
     emb = torch.tensor(enc.encode(texts, batch_size=128, normalize_embeddings=True))
     torch.save(emb, TITLE_CACHE)
     return emb
+
+
+def build_ppr_bias(pairs, n, hop2_weight=0.3, min_count=2, topk=64):
+    """PinSage-style decode-time bias: direct adjacency at full weight PLUS
+    2-hop reachability (through a common next-song) weighted by path count,
+    the way personalized pagerank gives partial credit to nodes a short
+    random walk away, not just 1-hop neighbors. Cheap proxy for full PPR
+    (which needs power iteration to converge) via a single sparse matmul.
+    Message passing (edge_index, the GNN encoder) is untouched — this only
+    changes the decoder's per-step neighbor bias (see HybridDecoder)."""
+    import scipy.sparse as sp
+    counts = Counter()
+    for p in pairs:
+        ids = p["track_ids"]
+        for a, b in zip(ids, ids[1:]):
+            if a != b:
+                counts[(a, b)] += 1
+    edges = [e for e, c in counts.items() if c >= min_count]
+    src, dst = zip(*edges)
+    A = sp.csr_matrix((np.ones(len(edges)), (src, dst)), shape=(n, n))
+    A2 = (A @ A).tocsr()
+    nbrs = []
+    for i in range(n):
+        d = {int(j): 1.0 for j in A.indices[A.indptr[i]:A.indptr[i + 1]]}
+        row2_idx = A2.indices[A2.indptr[i]:A2.indptr[i + 1]]
+        row2_val = A2.data[A2.indptr[i]:A2.indptr[i + 1]]
+        if len(row2_val):
+            w2 = hop2_weight * row2_val / row2_val.max()
+            for j, w in zip(row2_idx, w2):
+                j = int(j)
+                if j not in d:
+                    d[j] = float(w)
+        items = sorted(d.items(), key=lambda kv: -kv[1])[:topk]
+        idx = torch.tensor([j for j, _ in items], dtype=torch.long)
+        w = torch.tensor([w for _, w in items], dtype=torch.float)
+        nbrs.append((idx, w))
+    return nbrs
 
 
 def build_lex_vocab(train_pairs, min_freq=40, cap=300):
@@ -610,6 +648,9 @@ def main():
                     help="prob of shuffling a training playlist's order per sample")
     ap.add_argument("--gat", action="store_true",
                     help="GATv2 song encoder (learned per-edge attention) instead of SAGE")
+    ap.add_argument("--ppr", action="store_true",
+                    help="PinSage-style 2-hop-weighted decode bias instead of 1-hop-only adjacency "
+                         "(message-passing edge_index is unaffected)")
     ap.add_argument("--out", default="data/model_text.pt")
     args = ap.parse_args()
     random.seed(args.seed)
@@ -639,6 +680,10 @@ def main():
     test, train = pairs[:n_test], pairs[n_test:]
     if args.cograph:
         edge_index, nbrs = build_co_graph(train, len(songs))
+        nbrs = [(i.to(dev), w.to(dev)) for i, w in nbrs]
+    elif args.ppr:
+        edge_index, _ = build_graph(train, len(songs))       # message passing: plain adjacency
+        nbrs = build_ppr_bias(train, len(songs))              # decode bias: 2-hop-weighted
         nbrs = [(i.to(dev), w.to(dev)) for i, w in nbrs]
     else:
         edge_index, nbrs = build_graph(train, len(songs))
