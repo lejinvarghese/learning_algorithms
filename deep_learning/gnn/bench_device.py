@@ -15,16 +15,17 @@ from train_text import (TextPlaylistModel, build_lex_vocab, build_text_cache,
 import torch.nn.functional as F
 
 
-def bench(dev_name, feats, edge_index, nbrs, cache, n2i, w2i, lex2id, chunk,
+def bench(dev_name, feats, edge_index, nbrs, cache, n2i, w2i, lexmap, chunk,
           hidden, steps=8):
     dev = torch.device(dev_name)
     feats, edge_index = feats.to(dev), edge_index.to(dev)
     nbrs = [t.to(dev) for t in nbrs]
     torch.manual_seed(0)
     model = TextPlaylistModel(feats.size(1), cache["name_emb"].size(1),
-                              hidden, len(lex2id)).to(dev)
+                              hidden, len(lexmap["words"])).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
-    emb, mask, lex, seqs = (t.to(dev) for t in encode_batch(chunk, cache, n2i, w2i, lex2id))
+    emb, mask, lex, seqs, _ = encode_batch(chunk, cache, n2i, w2i, lexmap)
+    emb, mask, lex, seqs = emb.to(dev), mask.to(dev), lex.to(dev), seqs.to(dev)
     times = []
     for i in range(steps):
         t0 = time.perf_counter()
@@ -54,7 +55,7 @@ def main():
     n2i = {n: i for i, n in enumerate(cache["names"])}
     w2i = {w: i for i, w in enumerate(cache["words"])}
     lex_vocab = build_lex_vocab(train)
-    lex2id = {w: i + 1 for i, w in enumerate(lex_vocab)}
+    lexmap = {"words": {w: i + 1 for i, w in enumerate(lex_vocab)}, "phrases": {}}
     chunk = train[:64]
 
     for hidden in (64, 128):
@@ -62,7 +63,7 @@ def main():
         for dev in ("cpu", "mps"):
             try:
                 t = bench(dev, feats, edge_index, nbrs, cache, n2i, w2i,
-                          lex2id, chunk, hidden)
+                          lexmap, chunk, hidden)
                 row += f"  {dev}: {t*1000:7.1f} ms/step"
             except Exception as e:
                 row += f"  {dev}: failed ({type(e).__name__})"

@@ -78,10 +78,16 @@ def main():
     model = TextPlaylistModel(feats.size(1), ckpt["emb_dim"], ckpt["hidden"],
                               len(lex_vocab), ckpt.get("n_artists", 0),
                               ckpt.get("layers", 0), lex_init,
-                              ckpt.get("steer", False))
+                              ckpt.get("steer", False), ckpt.get("genrebias", False))
     model.load_state_dict(ckpt["model"])
     model.eval()
     enc = get_encoder()
+    song_genre_ids, n_genres = None, lexmap.get("n_genres", 0)
+    if ckpt.get("genrebias"):
+        genres = [v.split("genre:", 1)[1] for v in lex_vocab if v.startswith("genre:")]
+        g2idx = {g: i for i, g in enumerate(genres)}
+        song_genre_ids = torch.tensor(
+            [g2idx.get(g, 0) for g in songs["track_genre"].fillna(genres[0])])
     with torch.no_grad():
         z = model.song_z(feats, artist_ids, edge_index)
 
@@ -97,13 +103,21 @@ def main():
         lex_hits = [lex_vocab[i - 1] for i in hit_ids]
         if hit_ids:
             lex[0, :len(hit_ids)] = torch.tensor(hit_ids)
+        qgenre = None
+        ag = lexmap.get("anchor_genre")
+        if ag and n_genres:
+            qgenre = torch.zeros(1, n_genres)
+            for aid in hit_ids:
+                if aid in ag:
+                    qgenre[0, ag[aid]] = 1.0
         tok, tmask, pooled = model.query(emb, mask, lex)
         with torch.no_grad():
             seq = model.dec.generate(z, tok, tmask, pooled, nbrs,
                                      length=SEQ_LEN, temp=args.temp,
                                      topk=args.topk, mmr=args.mmr,
                                      artists=all_artist_ids,
-                                     max_artist=args.max_artist)
+                                     max_artist=args.max_artist,
+                                     song_genre_ids=song_genre_ids, qgenre=qgenre)
         anchors = f"   lexical anchors: {lex_hits}" if lex_vocab else ""
         print(f"\n=== {q!r}{anchors}")
         for i, s in enumerate(seq):
