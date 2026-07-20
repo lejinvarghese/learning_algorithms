@@ -377,11 +377,23 @@ class HybridDecoder(SparseNeighborDecoder):
     hit@10 by exactly zero — all the real effect came from manually scaling
     it at generation time. So it carries no training-time parameter or
     cost; `genre_strength` is a plain multiplier the caller sets at
-    inference (see infer_text.py's --genre-strength, empirically ~2.5)."""
+    inference (see infer_text.py's --genre-strength, empirically ~2.5).
 
-    def __init__(self, hid, steer=False):
+    Auxiliary cluster heads (aux_dims): predict a song's k-means cluster
+    ID(s) at each step, alongside the main next-song logits, as an
+    auxiliary training loss. Cheap "RQ-KMeans" proxy for the semantic-ID
+    literature's finding that a coarse-grouping signal helps ranking
+    calibration on rare items — but per our own diagnostic
+    (diagnose_coldstart.py), our encoder is already inductive and
+    differentiates cold songs by content, so this targets rare-item RANKING
+    within an already-good embedding space, not representation collapse.
+    Training-only: generate() never touches these heads."""
+
+    def __init__(self, hid, steer=False, aux_dims=None):
         super().__init__(hid)
         self.steer_lin = nn.Linear(hid, hid) if steer else None
+        self.aux_heads = (nn.ModuleList(nn.Linear(hid, k) for k in aux_dims)
+                          if aux_dims else None)
 
     def step(self, h, inp, tok_emb, tok_mask, z, nbrs, last, cov=None,
              song_genre_ids=None, qgenre=None, genre_strength=0.0):
@@ -408,7 +420,7 @@ class HybridDecoder(SparseNeighborDecoder):
         if genre_strength and song_genre_ids is not None and qgenre is not None:
             hit = qgenre.gather(1, song_genre_ids.unsqueeze(0).expand(qgenre.size(0), -1))
             logits = logits + genre_strength * hit
-        return h, logits, attn.squeeze(1)          # attn: [B, T]
+        return h, logits, attn.squeeze(1), p        # attn: [B, T]
 
     def forward(self, z, tok_emb, tok_mask, pooled, nbrs, seqs):
         """Training path: no genre bias here — it's decode-only (see class
@@ -416,16 +428,19 @@ class HybridDecoder(SparseNeighborDecoder):
         B, L = seqs.shape
         h = torch.tanh(self.init(pooled))
         inp = self.start.expand(B, -1)
-        last, all_logits, cov = None, [], torch.zeros(B, tok_emb.size(1),
-                                                      device=tok_emb.device)
+        last, all_logits, all_p = None, [], []
+        cov = torch.zeros(B, tok_emb.size(1), device=tok_emb.device)
         for t in range(L):
-            h, logits, attn = self.step(h, inp, tok_emb, tok_mask, z, nbrs,
-                                        last, cov)
+            h, logits, attn, p = self.step(h, inp, tok_emb, tok_mask, z, nbrs,
+                                           last, cov)
             all_logits.append(logits)
+            all_p.append(p)
             cov = cov + attn
             last = seqs[:, t]
             inp = z[last]
-        return torch.stack(all_logits, 1), cov
+        aux_logits = ([head(torch.stack(all_p, 1)) for head in self.aux_heads]
+                     if self.aux_heads is not None else None)
+        return torch.stack(all_logits, 1), cov, aux_logits
 
     @torch.no_grad()
     def generate(self, z, tok_emb, tok_mask, pooled, nbrs, length=SEQ_LEN,
@@ -437,7 +452,7 @@ class HybridDecoder(SparseNeighborDecoder):
         seq, last = [], None
         cov = torch.zeros(1, tok_emb.size(1), device=tok_emb.device)
         for _ in range(length):
-            h, logits, attn = self.step(h, inp, tok_emb, tok_mask, z, nbrs,
+            h, logits, attn, _ = self.step(h, inp, tok_emb, tok_mask, z, nbrs,
                                         last, cov, song_genre_ids, qgenre,
                                         genre_strength)
             cov = cov + attn
@@ -469,7 +484,7 @@ class HybridDecoder(SparseNeighborDecoder):
 
 class TextPlaylistModel(nn.Module):
     def __init__(self, feat_dim, emb_dim, hid, lex_vocab=0, n_artists=0,
-                 layers=0, lex_init=None, steer=False, gat=False):
+                 layers=0, lex_init=None, steer=False, gat=False, aux_dims=None):
         super().__init__()
         self.artist_emb = nn.Embedding(n_artists, ARTIST_DIM) if n_artists else None
         in_dim = feat_dim + (ARTIST_DIM if n_artists else 0)
@@ -480,7 +495,7 @@ class TextPlaylistModel(nn.Module):
         else:
             self.songs = SongEncoder(in_dim, hid)
         self.query = TextQueryEncoder(emb_dim, hid, lex_vocab, lex_init)
-        self.dec = HybridDecoder(hid, steer)
+        self.dec = HybridDecoder(hid, steer, aux_dims)
 
     def song_z(self, feats, artist_ids, edge_index):
         x = feats
@@ -564,7 +579,7 @@ def ndcg_at_10(logits, seqs):
 
 def run_epoch(model, opt, pairs, feats, edge_index, nbrs, cache, n2i, w2i,
               lex2id, cov_w, artist_ids=None, listwise=0.0, log_prior=None,
-              shuffle_p=0.0, batch=64):
+              shuffle_p=0.0, cluster_ids=None, aux_weight=0.0, batch=64):
     model.train()
     dev = feats.device
     random.shuffle(pairs)
@@ -581,7 +596,7 @@ def run_epoch(model, opt, pairs, feats, edge_index, nbrs, cache, n2i, w2i,
                     seqs[b] = seqs[b][torch.randperm(seqs.size(1), device=dev)]
         z = model.song_z(feats, artist_ids, edge_index)
         tok, tmask, pooled = model.query(emb, mask, lex)
-        logits, cov = model.dec(z, tok, tmask, pooled, nbrs, seqs)
+        logits, cov, aux_logits = model.dec(z, tok, tmask, pooled, nbrs, seqs)
         # logit adjustment (Menon et al. 2021): add the popularity log-prior
         # during training only, so the model learns popularity-residual scores
         # and rare songs get larger margins; inference uses raw logits.
@@ -591,6 +606,11 @@ def run_epoch(model, opt, pairs, feats, edge_index, nbrs, cache, n2i, w2i,
             if listwise > 0 else ce
         if cov_w > 0:
             loss = loss + cov_w * coverage_loss(cov, tmask.float())
+        if aux_logits is not None and cluster_ids is not None:
+            for al, cid in zip(aux_logits, cluster_ids):
+                target = cid[seqs]
+                loss = loss + aux_weight * F.cross_entropy(
+                    al.flatten(0, 1), target.flatten())
         opt.zero_grad()
         loss.backward()
         opt.step()
@@ -611,7 +631,7 @@ def evaluate(model, pairs, feats, edge_index, nbrs, cache, n2i, w2i, lex2id,
         emb, mask, lex, seqs = (t.to(dev) for t in encode_batch(
             pairs[i:i + batch], cache, n2i, w2i, lex2id))
         tok, tmask, pooled = model.query(emb, mask, lex)
-        logits, cov = model.dec(z, tok, tmask, pooled, nbrs, seqs)
+        logits, cov, _ = model.dec(z, tok, tmask, pooled, nbrs, seqs)
         topk = logits.topk(k, dim=-1).indices
         hits += (topk == seqs.unsqueeze(-1)).any(-1).sum().item()
         n += seqs.numel()
@@ -651,6 +671,11 @@ def main():
     ap.add_argument("--ppr", action="store_true",
                     help="PinSage-style 2-hop-weighted decode bias instead of 1-hop-only adjacency "
                          "(message-passing edge_index is unaffected)")
+    ap.add_argument("--clusters", default=None,
+                    help="path to clusters.pt (from compute_clusters.py) for the auxiliary "
+                         "cluster-ID training loss")
+    ap.add_argument("--aux-weight", type=float, default=0.3, dest="aux_weight",
+                    help="loss weight for the auxiliary cluster prediction heads")
     ap.add_argument("--out", default="data/model_text.pt")
     args = ap.parse_args()
     random.seed(args.seed)
@@ -716,14 +741,24 @@ def main():
         pop = _C(s for p in train for s in p["track_ids"])
         counts = torch.tensor([pop.get(i, 0) + 1.0 for i in range(len(songs))])
         log_prior = (args.logitadj * torch.log(counts / counts.sum())).to(dev)
+
+    aux_dims, cluster_ids = None, None
+    if args.clusters:
+        cl = torch.load(args.clusters)
+        aux_dims = [cl["k1"], cl["k2"]]
+        cluster_ids = [cl["c1"].to(dev), cl["c2"].to(dev)]
+        print(f"auxiliary cluster heads: k1={cl['k1']} k2={cl['k2']} "
+              f"weight={args.aux_weight} (source: {cl.get('source_ckpt')})")
+
     model = TextPlaylistModel(feats.size(1), emb_dim, args.hidden,
                               len(lex_vocab), n_artists, args.layers,
-                              lex_init, args.steer, args.gat).to(dev)
+                              lex_init, args.steer, args.gat, aux_dims).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
     for ep in range(args.epochs):
         loss = run_epoch(model, opt, train, feats, edge_index, nbrs, cache,
                          n2i, w2i, lexmap, args.coverage, artist_ids,
-                         args.listwise, log_prior, args.shuffle)
+                         args.listwise, log_prior, args.shuffle,
+                         cluster_ids, args.aux_weight)
         hit, unmet, ndcg = evaluate(model, test, feats, edge_index, nbrs, cache,
                                     n2i, w2i, lexmap, artist_ids)
         print(f"epoch {ep+1}: loss {loss:.3f}  test hit@10 {hit:.2%}  "

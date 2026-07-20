@@ -84,7 +84,7 @@ def main():
             chunk = test[i:i + 256]
             emb, mask, lex, seqs = encode_batch(chunk, cache, n2i, w2i, lex2id)
             tok, tmask, pooled = model.query(emb, mask, lex)
-            logits, _ = model.dec(z, tok, tmask, pooled, nbrs, seqs)
+            logits, _, _ = model.dec(z, tok, tmask, pooled, nbrs, seqs)
             tgt_logit = logits.gather(-1, seqs.unsqueeze(-1))
             rank = (logits > tgt_logit).sum(-1) + 1          # [B, L]
             top10 = logits.topk(10, -1).indices
