@@ -613,6 +613,7 @@ def run_epoch(model, opt, pairs, feats, edge_index, nbrs, cache, n2i, w2i,
                     al.flatten(0, 1), target.flatten())
         opt.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
         opt.step()
         total, nb = total + loss.item(), nb + 1
     return total / nb
@@ -760,8 +761,8 @@ def main():
     sched = (torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs,
                                                         eta_min=args.lr * 0.02)
              if args.lr_decay else None)
-    def ckpt_dict():
-        return {"model": model.state_dict(), "emb_dim": emb_dim,
+    def ckpt_dict(state=None):
+        return {"model": state if state is not None else model.state_dict(), "emb_dim": emb_dim,
                 "hidden": args.hidden, "lex_vocab": lex_vocab,
                 "content": args.content, "n_artists": n_artists,
                 "layers": args.layers, "steer": args.steer, "gat": args.gat,
@@ -779,9 +780,13 @@ def main():
                          cluster_ids, args.aux_weight)
         hit, unmet, ndcg = evaluate(model, test, feats, edge_index, nbrs, cache,
                                     n2i, w2i, lexmap, artist_ids)
+        best_path = args.out.rsplit(".", 1)[0] + "_best.pt"
         if hit > best_hit:
             best_hit = hit
             best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+            # save immediately, not just at the end -- a kill/crash mid-run
+            # (e.g. an instability spike) shouldn't lose the best epoch seen so far.
+            torch.save(ckpt_dict(best_state), best_path)
         cur_lr = opt.param_groups[0]["lr"]
         print(f"epoch {ep+1}: loss {loss:.3f}  test hit@10 {hit:.2%}  "
               f"ndcg@10 {ndcg:.3f}  unmet-intent rate {unmet:.1%}  "
@@ -792,11 +797,9 @@ def main():
 
     torch.save(ckpt_dict(), args.out)
     print(f"saved {args.out} (final epoch, hit@10 {hit:.2%})")
-    if best_state is not None and best_hit > hit:
-        model.load_state_dict(best_state)
-        best_path = args.out.rsplit(".", 1)[0] + "_best.pt"
-        torch.save(ckpt_dict(), best_path)
-        print(f"saved {best_path} (best epoch, hit@10 {best_hit:.2%})")
+    if best_state is not None:
+        print(f"best checkpoint already saved during training: {best_path} "
+              f"(hit@10 {best_hit:.2%})")
 
 
 if __name__ == "__main__":
