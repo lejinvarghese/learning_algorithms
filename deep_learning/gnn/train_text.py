@@ -171,6 +171,47 @@ def build_ppr_bias(pairs, n, hop2_weight=0.3, min_count=2, topk=64):
     return nbrs
 
 
+def splice_playlists(pairs, rng, cache, n2i, seq_len=SEQ_LEN, min_each=3):
+    """Synthesize a compound-intent training example: pick two playlists,
+    union their name tokens into one query, interleave their songs into one
+    target sequence. This is GECA-style compositional data augmentation
+    (Andreas 2020) -- the standard general-purpose fix for the SCAN-type
+    failure where seq2seq models learn "christmas" and "metal" individually
+    but never their combination, because standard training data almost
+    never demonstrates composition, only components in isolation (verified
+    empirically here: real multi-facet/conflicting-intent training queries
+    are a vanishing fraction of this dataset).
+
+    Attention-coverage losses (--coverage/--steer) can't fix this: they
+    reshape what the decoder ATTENDS to, but cross-entropy only ever
+    rewards what's in the TARGET sequence, and every real target sequence
+    here is single-facet. Only a target sequence that genuinely blends two
+    facets can teach the model that blending is the correct behavior.
+
+    Random pairing is used deliberately, not similarity/genre-targeted
+    pairing: compositional-augmentation literature finds uniform-random
+    recombination performs nearly as well as carefully targeted sampling.
+    """
+    a, b = rng.sample(pairs, 2)
+    ids_a, ids_b = a["track_ids"][:seq_len], b["track_ids"][:seq_len]
+    if len(ids_a) < min_each or len(ids_b) < min_each:
+        return None
+    merged = []
+    for i in range(max(len(ids_a), len(ids_b))):
+        if i < len(ids_a):
+            merged.append(ids_a[i])
+        if i < len(ids_b):
+            merged.append(ids_b[i])
+    merged = merged[:seq_len]
+    if len(merged) < seq_len:
+        return None
+    # synthetic name has no cached whole-sentence embedding; approximate the
+    # combined-intent embedding as the mean of the two source embeddings
+    # (word-level anchors still come from the real, cached per-word vectors).
+    emb = (cache["name_emb"][n2i[a["name"]]] + cache["name_emb"][n2i[b["name"]]]) / 2
+    return {"name": f"{a['name']} {b['name']}", "track_ids": merged, "_emb_override": emb}
+
+
 def build_lex_vocab(train_pairs, min_freq=40, cap=300):
     cnt = Counter(w for p in train_pairs for w in set(words_of(p["name"])))
     return [w for w, c in cnt.most_common(cap) if c >= min_freq]
@@ -504,16 +545,17 @@ class TextPlaylistModel(nn.Module):
         return self.songs(x, edge_index)
 
 
-def query_embs_for(name, cache, n2i, w2i, lexmap):
+def query_embs_for(name, cache, n2i, w2i, lexmap, emb_override=None):
     D = cache["name_emb"].size(1)
     emb = torch.zeros(1 + MAX_WORDS, D)
     mask = torch.zeros(1 + MAX_WORDS, dtype=torch.bool)
-    emb[0] = cache["name_emb"][n2i[name]]
+    emb[0] = emb_override if emb_override is not None else cache["name_emb"][n2i[name]]
     mask[0] = True
     ws = words_of(name)
     for j, w in enumerate(ws[:MAX_WORDS]):
-        emb[1 + j] = cache["word_emb"][w2i[w]]
-        mask[1 + j] = True
+        if w in w2i:                       # synthetic combined names are safe: both
+            emb[1 + j] = cache["word_emb"][w2i[w]]   # halves' words are real, cached words
+            mask[1 + j] = True
     lex = torch.zeros(MAX_LEX, dtype=torch.long)
     hits = find_anchors(name, lexmap)
     if hits:
@@ -525,7 +567,8 @@ def encode_batch(chunk, cache, n2i, w2i, lexmap):
     """Training/eval batch encoding. Genre bias is decode-only (see
     HybridDecoder), so this does not build qgenre — infer_text.py builds it
     independently for generation."""
-    embs, masks, lexs = zip(*(query_embs_for(p["name"], cache, n2i, w2i, lexmap)
+    embs, masks, lexs = zip(*(query_embs_for(p["name"], cache, n2i, w2i, lexmap,
+                                             p.get("_emb_override"))
                               for p in chunk))
     seqs = torch.tensor([p["track_ids"][:SEQ_LEN] for p in chunk])
     return torch.stack(embs), torch.stack(masks), torch.stack(lexs), seqs
@@ -680,6 +723,9 @@ def main():
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--lr-decay", action="store_true", dest="lr_decay",
                     help="cosine anneal lr from --lr down to 2%% of it over all epochs")
+    ap.add_argument("--splice", type=int, default=0,
+                    help="number of synthetic compound-intent training pairs (two "
+                         "playlists merged, GECA-style) to inject fresh each epoch")
     ap.add_argument("--out", default="data/model_text.pt")
     args = ap.parse_args()
     random.seed(args.seed)
@@ -774,7 +820,16 @@ def main():
 
     best_hit, best_state = 0.0, None
     for ep in range(args.epochs):
-        loss = run_epoch(model, opt, train, feats, edge_index, nbrs, cache,
+        train_ep = train
+        if args.splice:
+            # fresh random recombinations each epoch -- GECA-style compositional
+            # augmentation, teaching the model that a compound query's TARGET
+            # sequence should genuinely contain both facets. Regenerating per
+            # epoch (like --shuffle) maximizes coverage of the combinatorial
+            # space rather than fixing the same synthetic pairs throughout.
+            synth = [splice_playlists(train, random, cache, n2i) for _ in range(args.splice)]
+            train_ep = train + [s for s in synth if s is not None]
+        loss = run_epoch(model, opt, train_ep, feats, edge_index, nbrs, cache,
                          n2i, w2i, lexmap, args.coverage, artist_ids,
                          args.listwise, log_prior, args.shuffle,
                          cluster_ids, args.aux_weight)
