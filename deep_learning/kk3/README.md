@@ -47,9 +47,14 @@ Or override any field directly: `K3MicroConfig(hidden_dim=192, num_routed_expert
 
 ## Run
 
+Trains on `k3micro/data.py`'s tiny procedural dataset: colored-block images paired with
+byte-tokenized captions describing them (e.g. "a red square in the top-left") -- no download,
+pure torch, just enough signal to confirm the vision splice and text loss are both learning.
+
 ```bash
 pip install -r requirements.txt
 python train.py                # smoke-test: builds the model, prints param counts, trains a few steps
 python train.py --mult 0.5     # scale down further
 python train.py --no-vision    # drop the vision tower to save memory
+python train.py --help         # full option list (click-based CLI)
 ```
