@@ -1,19 +1,17 @@
-"""Assembles K3-Micro from the layers in layers.py: hybrid KDA/MLA blocks
-under Attention Residuals, a native vision pathway (MoonViT-micro), and an
-optional MTP head. Mirrors Fig. 2 / Table 1 of the Kimi K3 tech report."""
+# Assembles K3 from the layers in layers.py: hybrid KDA/MLA blocks under attention residuals,
+# a native vision pathway, and an optional multi-token-prediction head.
 from typing import List, Optional
 
 import torch
 import torch.nn as nn
 
-from .config import K3MicroConfig
+from .config import K3Config
 from .layers import AttnResGate, GatedMLA, KimiDeltaAttention, RMSNorm, StableLatentMoE
 
 
-def build_layer_pattern(cfg: K3MicroConfig) -> List[List[str]]:
-    """3 KDA layers : 1 Gated MLA layer per block (§2.1); the very last layer
-    of the whole backbone is forced to MLA so global attention always closes
-    the network, as in K3."""
+def build_layer_pattern(cfg: K3Config) -> List[List[str]]:
+    # KDA layers closed out by a Gated MLA layer per block; the very last layer of the whole
+    # backbone is forced to MLA so global attention always closes the network.
     group = ["kda"] * cfg.kda_mla_ratio + ["mla"]
     per_block = (group * (cfg.layers_per_block // len(group)))[: cfg.layers_per_block]
     pattern = [list(per_block) for _ in range(cfg.num_blocks)]
@@ -21,8 +19,8 @@ def build_layer_pattern(cfg: K3MicroConfig) -> List[List[str]]:
     return pattern
 
 
-class K3MicroBlock(nn.Module):
-    def __init__(self, cfg: K3MicroConfig, layer_types: List[str]):
+class K3Block(nn.Module):
+    def __init__(self, cfg: K3Config, layer_types: List[str]):
         super().__init__()
         self.layers = nn.ModuleList()
         for lt in layer_types:
@@ -44,12 +42,10 @@ class K3MicroBlock(nn.Module):
         return partial
 
 
+# One extra block-shaped layer that fuses the final hidden state with the next token's
+# embedding to predict the token after that.
 class MTPHead(nn.Module):
-    """Multi-Token Prediction (§4.1.4): one extra block-shaped layer that
-    fuses the final hidden state with the next token's embedding to predict
-    the token after that."""
-
-    def __init__(self, cfg: K3MicroConfig, embed: nn.Embedding):
+    def __init__(self, cfg: K3Config, embed: nn.Embedding):
         super().__init__()
         self.embed = embed
         self.fuse_norm_h = RMSNorm(cfg.hidden_dim)
@@ -61,7 +57,6 @@ class MTPHead(nn.Module):
         self.norm = RMSNorm(cfg.hidden_dim)
 
     def forward(self, hidden: torch.Tensor, input_ids: torch.Tensor) -> torch.Tensor:
-        B, T, d = hidden.shape
         next_emb = torch.zeros_like(hidden)
         next_emb[:, :-1] = self.embed(input_ids)[:, 1:]
         fused = self.fuse(torch.cat([self.fuse_norm_h(hidden), self.fuse_norm_e(next_emb)], dim=-1))
@@ -71,15 +66,12 @@ class MTPHead(nn.Module):
         return self.norm(m)
 
 
-class MoonViTMicro(nn.Module):
-    """Native vision pathway (§2.4): patchify -> plain ViT encoder (bias-free
-    projections, RMSNorm) -> 2x2 pixel-shuffle token merge -> MLP projector
-    into the shared embedding space. Single-image only; MoonViT-3D's
-    intra-frame/inter-frame factorized video attention is omitted for
-    conciseness -- the token-budget trick (pixel shuffle) is kept since it's
-    what makes long-context multimodal inputs affordable."""
-
-    def __init__(self, cfg: K3MicroConfig):
+# Patchify, encode with a plain ViT (bias-free projections, RMSNorm), merge tokens 2x2, then
+# project into the shared embedding space. Single-image only -- video's factorized
+# frame-to-frame attention is left out, though the token-merging step that keeps long
+# multimodal sequences affordable is kept.
+class MoonViT(nn.Module):
+    def __init__(self, cfg: K3Config):
         super().__init__()
         self.patch_size = cfg.vit_patch_size
         self.patch_embed = nn.Conv2d(3, cfg.vit_hidden, cfg.vit_patch_size, stride=cfg.vit_patch_size, bias=False)
@@ -107,19 +99,19 @@ class MoonViTMicro(nn.Module):
         x = self.final_norm(self.encoder(x))
 
         n = x.shape[1] - (x.shape[1] % 4)
-        x = x[:, :n].reshape(x.shape[0], n // 4, 4 * x.shape[-1])  # 2x2 pixel-shuffle merge
+        x = x[:, :n].reshape(x.shape[0], n // 4, 4 * x.shape[-1])  # merge 2x2 patches into one token
         return self.projector(x)  # (B, N/4, hidden_dim), ready to splice into the token stream
 
 
-class K3MicroModel(nn.Module):
-    def __init__(self, cfg: K3MicroConfig):
+class K3Model(nn.Module):
+    def __init__(self, cfg: K3Config):
         super().__init__()
         self.cfg = cfg
         self.embed = nn.Embedding(cfg.vocab_size, cfg.hidden_dim)
         self.embed_norm = RMSNorm(cfg.hidden_dim)
 
         self.blocks = nn.ModuleList(
-            [K3MicroBlock(cfg, pattern) for pattern in build_layer_pattern(cfg)]
+            [K3Block(cfg, pattern) for pattern in build_layer_pattern(cfg)]
         )
         self.final_norm = RMSNorm(cfg.hidden_dim)
         self.lm_head = nn.Linear(cfg.hidden_dim, cfg.vocab_size, bias=False)
@@ -127,14 +119,14 @@ class K3MicroModel(nn.Module):
             self.lm_head.weight = self.embed.weight
 
         self.mtp = MTPHead(cfg, self.embed) if cfg.use_mtp else None
-        self.vision = MoonViTMicro(cfg) if cfg.use_vision else None
+        self.vision = MoonViT(cfg) if cfg.use_vision else None
 
         nn.init.normal_(self.embed.weight, mean=0.0, std=0.02)
 
     def forward(self, input_ids: torch.Tensor, images: Optional[torch.Tensor] = None):
         x = self.embed_norm(self.embed(input_ids))
         if images is not None and self.vision is not None:
-            x = x + self.vision(images).mean(1, keepdim=True)  # simple splice for a single image token span
+            x = x + self.vision(images).mean(1, keepdim=True)  # pool image tokens into one splice point
 
         block_reps = [x]
         for block in self.blocks:
@@ -146,6 +138,8 @@ class K3MicroModel(nn.Module):
         return logits, mtp_logits
 
     def param_counts(self):
+        # Total parameters vs. an approximation of what's active per token once only a
+        # fraction of each layer's routed experts fire.
         total = sum(p.numel() for p in self.parameters())
         moe_params = sum(
             p.numel()
@@ -153,7 +147,6 @@ class K3MicroModel(nn.Module):
             for sub in block.layers
             for p in sub["moe"].routed_experts.parameters()
         )
-        experts_per_layer = self.cfg.num_routed_experts
-        active_frac = self.cfg.num_experts_active / max(1, experts_per_layer)
+        active_frac = self.cfg.num_experts_active / max(1, self.cfg.num_routed_experts)
         activated = total - moe_params + int(moe_params * active_frac)
         return {"total": total, "activated_approx": activated}

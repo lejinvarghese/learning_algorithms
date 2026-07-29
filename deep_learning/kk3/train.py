@@ -1,18 +1,13 @@
-"""Smoke test: builds K3-Micro, prints param counts, trains a few steps on
-the tiny procedural (caption, image) dataset in k3micro/data.py. Sized to fit
-a 6GB GPU at the default config.
-
-    python train.py                  # default micro config
-    python train.py --mult 0.5       # scale everything down further
-    python train.py --no-vision      # drop the vision tower to save memory
-"""
+# Builds K3, prints parameter counts, and trains for a few epochs on the toy dataset in
+# k3/data.py, evaluating on a held-out split after each epoch.
 import click
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from k3micro import K3MicroConfig, K3MicroModel
-from k3micro.data import ToyMultimodalDataset
+from k3 import K3Config, K3Model
+from k3.data import ToyMultimodalDataset
+from k3.eval import evaluate
 
 
 def pick_device() -> str:
@@ -24,15 +19,15 @@ def pick_device() -> str:
 
 
 @click.command()
-@click.option("--mult", type=float, default=1.0, show_default=True, help="scale factor over micro defaults")
-@click.option("--no-vision", is_flag=True, help="drop the vision tower to save memory")
-@click.option("--steps", type=int, default=5, show_default=True)
+@click.option("--mult", type=float, default=1.0, show_default=True, help="scale factor over the default config")
+@click.option("--no-vision", is_flag=True, help="drop the vision tower")
+@click.option("--epochs", type=int, default=3, show_default=True)
 @click.option("--batch-size", type=int, default=4, show_default=True)
 @click.option("--seq-len", type=int, default=32, show_default=True)
-def main(mult: float, no_vision: bool, steps: int, batch_size: int, seq_len: int):
-    cfg = K3MicroConfig.scaled(mult, use_vision=not no_vision)
+def main(mult: float, no_vision: bool, epochs: int, batch_size: int, seq_len: int):
+    cfg = K3Config.scaled(mult, use_vision=not no_vision)
     device = pick_device()
-    model = K3MicroModel(cfg).to(device)
+    model = K3Model(cfg).to(device)
 
     counts = model.param_counts()
     click.secho(f"device={device}", fg="cyan")
@@ -49,16 +44,16 @@ def main(mult: float, no_vision: bool, steps: int, batch_size: int, seq_len: int
         fg="yellow",
     )
 
-    dataset = ToyMultimodalDataset(n_samples=32, seq_len=seq_len, image_size=cfg.vit_patch_size * 8)
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+    image_size = cfg.vit_patch_size * 8
+    train_data = ToyMultimodalDataset(n_samples=32, seq_len=seq_len, image_size=image_size, seed=0)
+    test_data = ToyMultimodalDataset(n_samples=16, seq_len=seq_len, image_size=image_size, seed=1)
+    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, drop_last=True)
+    test_loader = DataLoader(test_data, batch_size=batch_size)
 
     opt = torch.optim.AdamW(model.parameters(), lr=3e-4)
-    step = 0
-    first_loss = None
-    while step < steps:
-        for ids, images in loader:
-            if step >= steps:
-                break
+    first_loss, global_step = None, 0
+    for epoch in range(1, epochs + 1):
+        for step, (ids, images) in enumerate(train_loader, start=1):
             ids = ids.to(device)
             images = images.to(device) if cfg.use_vision else None
 
@@ -77,9 +72,18 @@ def main(mult: float, no_vision: bool, steps: int, batch_size: int, seq_len: int
 
             loss_val = loss.item()
             first_loss = first_loss if first_loss is not None else loss_val
-            color = "green" if loss_val <= first_loss else "red"
-            click.secho(f"step {step}: loss={loss_val:.4f}", fg=color)
-            step += 1
+            global_step += 1
+            click.secho(
+                f"epoch {epoch}/{epochs} step {step}/{len(train_loader)} (global {global_step}): "
+                f"loss={loss_val:.4f}",
+                fg="green" if loss_val <= first_loss else "red",
+            )
+
+        metrics = evaluate(model, test_loader, cfg.vocab_size, device)
+        click.secho(
+            f"epoch {epoch}/{epochs} eval: loss={metrics['loss']:.4f} accuracy={metrics['accuracy']:.2%}",
+            fg="blue",
+        )
 
     if device == "cuda":
         click.secho(f"peak CUDA memory: {torch.cuda.max_memory_allocated() / 1e9:.2f} GB", fg="magenta")

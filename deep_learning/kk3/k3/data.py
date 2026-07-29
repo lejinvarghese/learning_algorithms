@@ -1,8 +1,7 @@
-"""Tiny procedural multimodal dataset for smoke-testing K3-Micro: a colored
-block on a canvas, paired with a caption describing it. No downloads, no
-extra dependencies (pure torch) -- just enough structure (image content
-actually correlates with the caption) to sanity-check that the vision
-splice and text loss are both learning something, not just running."""
+# A tiny procedural (caption, image) dataset for a training smoke test: a colored block on a
+# canvas paired with a caption describing it. Pure torch, no downloads -- image content
+# actually correlates with the caption, enough to confirm the vision splice and text loss are
+# both learning something, not just running.
 import random
 
 import torch
@@ -31,11 +30,9 @@ def render_image(color: str, position: str, size: int = 112) -> torch.Tensor:
     return img
 
 
+# `n_samples` (caption, image) pairs; captions are byte-encoded so no external tokenizer or
+# vocab file is needed.
 class ToyMultimodalDataset(Dataset):
-    """`n_samples` (caption, image) pairs; captions are byte-encoded so no
-    external tokenizer/vocab file is needed (bytes are < 256, comfortably
-    inside any K3MicroConfig.vocab_size)."""
-
     def __init__(self, n_samples: int = 32, seq_len: int = 32, image_size: int = 112, seed: int = 0):
         rng = random.Random(seed)
         self.seq_len, self.image_size = seq_len, image_size

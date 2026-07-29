@@ -1,13 +1,6 @@
-"""
-Building blocks of Kimi K3, reproduced at micro scale. Equation numbers refer
-to the Kimi K3 tech report, Section 2. Kernels are written as plain PyTorch
-(sequential recurrence for KDA, dense expert loop for MoE, exact quantile for
-Quantile Balancing) rather than the paper's fused/chunkwise/distributed
-kernels -- those optimizations target multi-trillion-parameter, multi-GPU
-training and are irrelevant at micro scale; the math they compute is the same.
-"""
-import math
-
+# Kimi K3's building blocks in plain PyTorch: a sequential recurrence for KDA, a dense masked
+# loop for expert dispatch, and an exact quantile for load balancing, in place of the paper's
+# fused/chunkwise/distributed kernels -- same math, without the large-scale throughput tricks.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -28,9 +21,8 @@ def l2norm(x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
     return x / x.norm(dim=-1, keepdim=True).clamp_min(eps)
 
 
+# Causal depthwise convolution that locally mixes KDA's q/k/v before the recurrence.
 class ShortConv(nn.Module):
-    """Causal depthwise conv used to locally mix q/k/v before KDA (§2.1.1)."""
-
     def __init__(self, dim: int, kernel_size: int = 4):
         super().__init__()
         self.kernel_size = kernel_size
@@ -43,10 +35,9 @@ class ShortConv(nn.Module):
         return x.transpose(1, 2)
 
 
+# A GLU with both branches softcapped by a scaled tanh, avoiding SwiGLU's unbounded growth
+# under extreme mixture-of-experts sparsity.
 class SiTUGLU(nn.Module):
-    """Sigmoid Tanh Unit GLU (Eq. 12): softcaps both GLU branches to avoid the
-    unbounded activation growth of SwiGLU at extreme MoE sparsity."""
-
     def __init__(self, dim_in: int, dim_hidden: int, beta1: float = 4.0, beta2: float = 25.0):
         super().__init__()
         self.w_gate = nn.Linear(dim_in, dim_hidden, bias=False)
@@ -61,29 +52,26 @@ class SiTUGLU(nn.Module):
         return self.w_down(gate * up)
 
 
+# Kimi Delta Attention's delta-rule recurrence, computed step by step rather than in a chunked
+# parallel form -- identical math, simpler to follow at this scale.
 def kda_recurrence(q, k, v, alpha, beta):
-    """Sequential form of Eq. 1: S_t = (I - b_t k_t k_t^T) Diag(a_t) S_{t-1} + b_t k_t v_t^T,
-    o_t = S_t^T q_t. q,k: (B,T,H,Dk); v: (B,T,H,Dv); alpha: (B,T,H,Dk) in (0,1); beta: (B,T,H) in (0,1).
-    A production kernel would use the chunkwise UT-transform parallel form (Kimi Linear);
-    at micro sequence lengths a direct per-step loop is simpler and numerically exact."""
     B, T, H, Dk = q.shape
     Dv = v.shape[-1]
     S = q.new_zeros(B, H, Dk, Dv)
     outs = []
     for t in range(T):
         k_t, v_t, a_t, b_t = k[:, t], v[:, t], alpha[:, t], beta[:, t]
-        S = S * a_t.unsqueeze(-1)                                   # Diag(alpha) S_{t-1}
-        kS = torch.einsum("bhk,bhkv->bhv", k_t, S)                  # k_t^T S
+        S = S * a_t.unsqueeze(-1)                                   # decay the running state
+        kS = torch.einsum("bhk,bhkv->bhv", k_t, S)
         S = S - b_t.unsqueeze(-1).unsqueeze(-1) * torch.einsum("bhk,bhv->bhkv", k_t, kS)
         S = S + b_t.unsqueeze(-1).unsqueeze(-1) * torch.einsum("bhk,bhv->bhkv", k_t, v_t)
         outs.append(torch.einsum("bhk,bhkv->bhv", q[:, t], S))
     return torch.stack(outs, dim=1)  # (B, T, H, Dv)
 
 
+# Delta-rule linear attention with a channel-wise, lower-bounded forget gate and a
+# full-rank output gate.
 class KimiDeltaAttention(nn.Module):
-    """KDA (§2.1.1): delta-rule linear attention with a channel-wise, lower-
-    bounded forget gate and a full-rank output gate."""
-
     def __init__(self, cfg):
         super().__init__()
         d, H, Dk, Dv, r = cfg.hidden_dim, cfg.num_heads, cfg.head_dim, cfg.head_dim, cfg.kda_decay_rank
@@ -93,16 +81,16 @@ class KimiDeltaAttention(nn.Module):
         self.k_lin, self.k_conv = nn.Linear(d, H * Dk, bias=False), ShortConv(H * Dk, cfg.conv_kernel_size)
         self.v_lin, self.v_conv = nn.Linear(d, H * Dv, bias=False), ShortConv(H * Dv, cfg.conv_kernel_size)
 
-        self.beta_lin = nn.Linear(d, H, bias=True)                  # Eq. 2: beta_t^h = Sigmoid(W_beta x_t)
+        self.beta_lin = nn.Linear(d, H, bias=True)                  # per-head write strength
 
-        self.alpha_down = nn.Linear(d, H * r, bias=False)           # low-rank decay logit (Eq. 2)
+        self.alpha_down = nn.Linear(d, H * r, bias=False)           # low-rank projection for the decay logits
         self.alpha_up = nn.Parameter(torch.randn(H, r, Dk) * (r ** -0.5))
         self.alpha_bias = nn.Parameter(torch.zeros(H, Dk))
-        self.log_scale = nn.Parameter(torch.zeros(H))               # A_h, per-head log-scale (Eq. 5)
+        self.log_scale = nn.Parameter(torch.zeros(H))               # per-head decay log-scale
         self.gmin = cfg.kda_gmin
 
-        self.out_gate = nn.Linear(d, H * Dv, bias=False)            # full-rank output gate (Eq. 6)
-        self.out_norm = RMSNorm(Dv)                                 # head-wise RMSNorm before gating
+        self.out_gate = nn.Linear(d, H * Dv, bias=False)            # full-rank output gate
+        self.out_norm = RMSNorm(Dv)                                 # per-head norm before gating
         self.out_proj = nn.Linear(H * Dv, d, bias=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -117,7 +105,7 @@ class KimiDeltaAttention(nn.Module):
 
         z = torch.einsum("bthr,hrk->bthk", self.alpha_down(x).view(B, T, H, -1), self.alpha_up)
         z = z + self.alpha_bias
-        g = self.gmin * torch.sigmoid(torch.exp(self.log_scale).view(1, 1, H, 1) * z)  # Eq. 5
+        g = self.gmin * torch.sigmoid(torch.exp(self.log_scale).view(1, 1, H, 1) * z)  # bounded log-decay
         alpha = torch.exp(g)
 
         o = kda_recurrence(q, k, v, alpha, beta)
@@ -127,11 +115,9 @@ class KimiDeltaAttention(nn.Module):
         return self.out_proj(y)
 
 
+# Multi-head latent attention with low-rank q/kv compression and no positional encoding --
+# position is carried by the interleaved KDA layers instead.
 class GatedMLA(nn.Module):
-    """Gated Multi-Head Latent Attention (§2.1.2): low-rank q/kv compression,
-    NoPE (no positional encoding -- position comes from the interleaved KDA
-    layers instead), full-rank output gate (Eq. 7)."""
-
     def __init__(self, cfg):
         super().__init__()
         d, H, Dh, lat = cfg.hidden_dim, cfg.num_heads, cfg.head_dim, cfg.mla_latent_dim
@@ -155,20 +141,16 @@ class GatedMLA(nn.Module):
         k = self.k_up(c_kv).view(B, T, H, Dh).transpose(1, 2)
         v = self.v_up(c_kv).view(B, T, H, Dh).transpose(1, 2)
 
-        o = F.scaled_dot_product_attention(q, k, v, is_causal=True)  # NoPE: no rotary/pos bias
+        o = F.scaled_dot_product_attention(q, k, v, is_causal=True)  # no rotary or positional bias
         o = o.transpose(1, 2).reshape(B, T, H * Dh)
 
         gate = torch.sigmoid(self.out_gate(x))
         return self.out_proj(gate * o)
 
 
+# Auxiliary-loss-free expert routing: the bias term is set, per batch, to the exact quantile
+# that yields the target load per expert, rather than nudged there by a fixed step size.
 class QuantileBalancingRouter(nn.Module):
-    """Quantile Balancing (§2.3.3, Eq. 13-14): auxiliary-loss-free routing
-    with a bias term set exactly, per-batch, to the quantile that yields the
-    target per-expert load. The paper approximates this quantile via a
-    cross-rank histogram for distributed training at ~10^3 experts; at micro
-    scale a single-process exact `torch.quantile` computes the same update."""
-
     def __init__(self, dim: int, num_experts: int, k: int):
         super().__init__()
         self.w_r = nn.Linear(dim, num_experts, bias=False)
@@ -177,32 +159,29 @@ class QuantileBalancingRouter(nn.Module):
         self.num_experts = num_experts
 
     def forward(self, x: torch.Tensor):  # x: (N, d)
-        s = torch.sigmoid(self.w_r(x))                  # (N, n_experts), Eq. 13
+        s = torch.sigmoid(self.w_r(x))                  # router scores
         biased = s + self.bias
         top_val, top_idx = biased.topk(self.k + 1, dim=-1)
         routed_idx = top_idx[:, : self.k]
-        cutoff = top_val[:, self.k]                      # alpha_i^(t): the (k+1)-th margin
+        cutoff = top_val[:, self.k]                      # score of the expert just missing the cut
 
         routed_raw = torch.gather(s, -1, routed_idx)
         weights = routed_raw / routed_raw.sum(-1, keepdim=True).clamp_min(1e-9)
 
         if self.training:
             with torch.no_grad():
-                margins = s - cutoff.unsqueeze(-1)                     # (N, n_experts)
+                margins = s - cutoff.unsqueeze(-1)
                 q = 1.0 - self.k / self.num_experts
-                bias_hat = -torch.quantile(margins, q, dim=0)          # Eq. 14
-                self.bias.copy_(bias_hat - bias_hat.mean())            # takes effect next call
+                bias_hat = -torch.quantile(margins, q, dim=0)
+                self.bias.copy_(bias_hat - bias_hat.mean())  # takes effect on the next call
 
         return routed_idx, weights
 
 
+# Shared experts run full-width on every token; routed experts run in a compact latent space,
+# letting the routed pool scale to many more experts per unit of compute. A norm before the
+# up-projection keeps that aggregate stable before it's combined with the shared-expert path.
 class StableLatentMoE(nn.Module):
-    """Stable LatentMoE (§2.3, Eq. 11): shared experts run full-width on x;
-    routed experts run in a compact latent space of width `latent_dim`,
-    letting the routed pool scale to many more experts per unit of compute.
-    An RMSNorm before the up-projection (§2.3.1) stabilizes the aggregate
-    scale before it's combined with the shared-expert path."""
-
     def __init__(self, cfg):
         super().__init__()
         d, l = cfg.hidden_dim, cfg.latent_dim
@@ -240,12 +219,10 @@ class StableLatentMoE(nn.Module):
         return y.view(B, T, d)
 
 
+# Replaces the standard residual stream with an attention pool: a learned per-layer query
+# attends over the representations of all preceding blocks (plus the running sum within the
+# current block) to build this layer's input.
 class AttnResGate(nn.Module):
-    """Attention Residuals (§2.2, Eq. 8-9): each layer replaces the standard
-    residual stream with an attention pool, using a learned per-layer
-    pseudo-query, over the representations of all preceding blocks (+ the
-    running partial sum within the current block)."""
-
     def __init__(self, dim: int):
         super().__init__()
         self.q = nn.Parameter(torch.randn(dim) * dim ** -0.5)
@@ -254,5 +231,5 @@ class AttnResGate(nn.Module):
     def forward(self, reps: list) -> torch.Tensor:
         stacked = torch.stack(reps, dim=-2)                       # (B, T, N, d)
         logits = torch.einsum("d,btnd->btn", self.q, self.norm(stacked))
-        alpha = torch.softmax(logits, dim=-1)                     # softmax(q . RMSNorm(k)) == Eq. 9
+        alpha = torch.softmax(logits, dim=-1)
         return torch.einsum("btn,btnd->btd", alpha, stacked)
