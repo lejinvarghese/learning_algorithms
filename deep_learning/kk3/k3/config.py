@@ -43,8 +43,11 @@ class K3Config:
     vit_heads: int = 4
     vit_patch_size: int = 14            # kept equal to Kimi K3: input granularity, not model scale
     vit_mlp_ratio: float = 4.0
+    vit_num_frames: int = 8
+    vit_temporal_pool: int = 2
 
     tie_embeddings: bool = True
+    use_gradient_checkpointing: bool = False
 
     def __post_init__(self):
         assert self.hidden_dim % self.num_heads == 0, "hidden_dim must be divisible by num_heads"

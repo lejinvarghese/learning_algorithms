@@ -4,6 +4,7 @@ from typing import List, Optional
 
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 
 from .config import K3Config
 from .layers import AttnResGate, GatedMLA, KimiDeltaAttention, RMSNorm, StableLatentMoE
@@ -22,6 +23,7 @@ def build_layer_pattern(cfg: K3Config) -> List[List[str]]:
 class K3Block(nn.Module):
     def __init__(self, cfg: K3Config, layer_types: List[str]):
         super().__init__()
+        self.checkpoint_attn = cfg.use_gradient_checkpointing
         self.layers = nn.ModuleList()
         for lt in layer_types:
             attn = KimiDeltaAttention(cfg) if lt == "kda" else GatedMLA(cfg)
@@ -36,7 +38,10 @@ class K3Block(nn.Module):
         for i, sub in enumerate(self.layers):
             ctx = block_reps + ([partial] if i > 0 else [])
             h = sub["gate"](ctx)
-            a = sub["attn"](h) + h
+            if self.checkpoint_attn and self.training:
+                a = checkpoint(sub["attn"], h, use_reentrant=False) + h
+            else:
+                a = sub["attn"](h) + h
             m = sub["moe"](a) + a
             partial = partial + m
         return partial
@@ -66,26 +71,29 @@ class MTPHead(nn.Module):
         return self.norm(m)
 
 
-# Patchify, encode with a plain ViT (bias-free projections, RMSNorm), merge tokens 2x2, then
-# project into the shared embedding space. Single-image only -- video's factorized
-# frame-to-frame attention is left out, though the token-merging step that keeps long
-# multimodal sequences affordable is kept.
+def _vit_block(cfg: K3Config) -> nn.TransformerEncoderLayer:
+    return nn.TransformerEncoderLayer(
+        d_model=cfg.vit_hidden,
+        nhead=cfg.vit_heads,
+        dim_feedforward=int(cfg.vit_hidden * cfg.vit_mlp_ratio),
+        batch_first=True,
+        norm_first=True,
+        bias=False,
+    )
+
+
 class MoonViT(nn.Module):
     def __init__(self, cfg: K3Config):
         super().__init__()
         self.patch_size = cfg.vit_patch_size
+        self.temporal_pool = cfg.vit_temporal_pool
         self.patch_embed = nn.Conv2d(3, cfg.vit_hidden, cfg.vit_patch_size, stride=cfg.vit_patch_size, bias=False)
-        self.pos_embed = nn.Parameter(torch.randn(1, 4096, cfg.vit_hidden) * 0.02)
+        self.spatial_pos = nn.Parameter(torch.randn(1, 4096, cfg.vit_hidden) * 0.02)
+        self.temporal_pos = nn.Parameter(torch.randn(1, cfg.vit_num_frames, cfg.vit_hidden) * 0.02)
 
-        layer = nn.TransformerEncoderLayer(
-            d_model=cfg.vit_hidden,
-            nhead=cfg.vit_heads,
-            dim_feedforward=int(cfg.vit_hidden * cfg.vit_mlp_ratio),
-            batch_first=True,
-            norm_first=True,
-            bias=False,
+        self.layers = nn.ModuleList(
+            [nn.ModuleList([_vit_block(cfg), _vit_block(cfg)]) for _ in range(cfg.vit_layers)]
         )
-        self.encoder = nn.TransformerEncoder(layer, num_layers=cfg.vit_layers)
         self.final_norm = RMSNorm(cfg.vit_hidden)
         self.projector = nn.Sequential(
             nn.Linear(cfg.vit_hidden * 4, cfg.vit_hidden * 4, bias=False),
@@ -93,14 +101,29 @@ class MoonViT(nn.Module):
             nn.Linear(cfg.vit_hidden * 4, cfg.hidden_dim, bias=False),
         )
 
-    def forward(self, images: torch.Tensor) -> torch.Tensor:  # (B, 3, H, W)
-        x = self.patch_embed(images).flatten(2).transpose(1, 2)  # (B, N, vit_hidden)
-        x = x + self.pos_embed[:, : x.shape[1]]
-        x = self.final_norm(self.encoder(x))
+    def forward(self, frames: torch.Tensor) -> torch.Tensor:
+        B, F, C, H, W = frames.shape
+        x = self.patch_embed(frames.reshape(B * F, C, H, W)).flatten(2).transpose(1, 2)
+        P = x.shape[1]
+        x = x + self.spatial_pos[:, :P]
+        x = (x.view(B, F, P, -1) + self.temporal_pos[:, :F].unsqueeze(2)).view(B * F, P, -1)
 
-        n = x.shape[1] - (x.shape[1] % 4)
-        x = x[:, :n].reshape(x.shape[0], n // 4, 4 * x.shape[-1])  # merge 2x2 patches into one token
-        return self.projector(x)  # (B, N/4, hidden_dim), ready to splice into the token stream
+        for spatial_attn, temporal_attn in self.layers:
+            x = spatial_attn(x)
+            if F > 1:
+                x = x.view(B, F, P, -1).transpose(1, 2).reshape(B * P, F, -1)
+                x = temporal_attn(x)
+                x = x.view(B, P, F, -1).transpose(1, 2).reshape(B * F, P, -1)
+
+        x = self.final_norm(x).view(B, F, P, -1)
+        if F > 1:
+            kept = (F // self.temporal_pool) * self.temporal_pool
+            x = x[:, :kept].view(B, kept // self.temporal_pool, self.temporal_pool, P, -1).mean(2)
+        F = x.shape[1]
+
+        n = P - (P % 4)
+        x = x[:, :, :n].reshape(B * F, n // 4, 4 * x.shape[-1])
+        return self.projector(x).view(B, F * (n // 4), -1)
 
 
 class K3Model(nn.Module):
@@ -126,7 +149,7 @@ class K3Model(nn.Module):
     def forward(self, input_ids: torch.Tensor, images: Optional[torch.Tensor] = None):
         x = self.embed_norm(self.embed(input_ids))
         if images is not None and self.vision is not None:
-            x = x + self.vision(images).mean(1, keepdim=True)  # pool image tokens into one splice point
+            x = x + self.vision(images).mean(1, keepdim=True)
 
         block_reps = [x]
         for block in self.blocks:

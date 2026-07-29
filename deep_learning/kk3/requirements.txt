@@ -1,2 +1,5 @@
 torch>=2.2
 click>=8.1
+av>=11
+numpy
+accelerate>=0.30

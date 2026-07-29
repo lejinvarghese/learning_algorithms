@@ -6,8 +6,8 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 
 from k3 import K3Config, K3Model
-from k3.data import ToyMultimodalDataset
 from k3.eval import evaluate
+from k3.video import RealVideoDataset
 
 
 def _deepspeed_plugin(cpu_offload: bool):
@@ -23,30 +23,26 @@ def _deepspeed_plugin(cpu_offload: bool):
 
 @click.command()
 @click.option("--mult", type=float, default=1.0, show_default=True, help="scale factor over the default config")
-@click.option("--no-vision", is_flag=True, help="drop the vision tower")
 @click.option("--epochs", type=int, default=3, show_default=True)
-@click.option("--batch-size", type=int, default=4, show_default=True)
+@click.option("--num-frames", type=int, default=8, show_default=True, help="frames sampled per clip")
 @click.option("--seq-len", type=int, default=32, show_default=True)
 @click.option("--grad-checkpoint", is_flag=True, help="recompute activations on backward to cut peak memory")
-@click.option("--grad-accum", type=int, default=1, show_default=True, help="steps to accumulate before an update")
 @click.option("--mixed-precision", type=click.Choice(["no", "fp16", "bf16"]), default="no", show_default=True)
 @click.option("--cpu-offload", is_flag=True, help="ZeRO-Offload optimizer state to CPU RAM (needs CUDA + deepspeed)")
-def main(mult, no_vision, epochs, batch_size, seq_len, grad_checkpoint, grad_accum, mixed_precision, cpu_offload):
-    accelerator = Accelerator(
-        gradient_accumulation_steps=grad_accum,
-        mixed_precision=mixed_precision,
-        deepspeed_plugin=_deepspeed_plugin(cpu_offload),
-    )
+def main(mult, epochs, num_frames, seq_len, grad_checkpoint, mixed_precision, cpu_offload):
+    accelerator = Accelerator(mixed_precision=mixed_precision, deepspeed_plugin=_deepspeed_plugin(cpu_offload))
 
-    cfg = K3Config.scaled(mult, use_vision=not no_vision, use_gradient_checkpointing=grad_checkpoint)
+    cfg = K3Config.scaled(mult, vit_num_frames=num_frames, use_gradient_checkpointing=grad_checkpoint)
     model = K3Model(cfg)
     counts = model.param_counts()
 
-    image_size = cfg.vit_patch_size * 8
-    train_data = ToyMultimodalDataset(n_samples=32, seq_len=seq_len, image_size=image_size, seed=0)
-    test_data = ToyMultimodalDataset(n_samples=16, seq_len=seq_len, image_size=image_size, seed=1)
-    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, drop_last=True)
-    test_loader = DataLoader(test_data, batch_size=batch_size)
+    frame_size = cfg.vit_patch_size * 8
+    if accelerator.is_main_process:
+        click.secho("downloading/caching test clips (first run only)...", fg="cyan")
+    train_data = RealVideoDataset(num_frames=num_frames, frame_size=frame_size, seq_len=seq_len, split="train")
+    test_data = RealVideoDataset(num_frames=num_frames, frame_size=frame_size, seq_len=seq_len, split="test")
+    train_loader = DataLoader(train_data, batch_size=1, shuffle=True)
+    test_loader = DataLoader(test_data, batch_size=1)
     opt = AdamW(model.parameters(), lr=3e-4)
 
     model, opt, train_loader, test_loader = accelerator.prepare(model, opt, train_loader, test_loader)
@@ -54,9 +50,8 @@ def main(mult, no_vision, epochs, batch_size, seq_len, grad_checkpoint, grad_acc
     if accelerator.is_main_process:
         click.secho(f"device={accelerator.device} mixed_precision={mixed_precision}", fg="cyan")
         click.secho(
-            f"config: hidden={cfg.hidden_dim} layers={cfg.num_layers} "
-            f"routed_experts={cfg.num_routed_experts} active={cfg.num_experts_active} "
-            f"vocab={cfg.vocab_size} vision={cfg.use_vision}",
+            f"config: hidden={cfg.hidden_dim} layers={cfg.num_layers} vit_layers={cfg.vit_layers} "
+            f"vit_num_frames={cfg.vit_num_frames} vit_temporal_pool={cfg.vit_temporal_pool}",
             fg="cyan",
         )
         click.secho(f"total params:     {counts['total'] / 1e6:8.2f} M", fg="yellow")
@@ -69,20 +64,18 @@ def main(mult, no_vision, epochs, batch_size, seq_len, grad_checkpoint, grad_acc
     first_loss, global_step = None, 0
     for epoch in range(1, epochs + 1):
         for step, (ids, images) in enumerate(train_loader, start=1):
-            images = images if cfg.use_vision else None
-            with accelerator.accumulate(model):
-                logits, mtp_logits = model(ids, images=images)
-                targets = ids.roll(-1, dims=1)
-                loss = F.cross_entropy(logits[:, :-1].reshape(-1, cfg.vocab_size), targets[:, :-1].reshape(-1))
-                if mtp_logits is not None:
-                    mtp_targets = ids.roll(-2, dims=1)
-                    loss = loss + 0.1 * F.cross_entropy(
-                        mtp_logits[:, :-2].reshape(-1, cfg.vocab_size), mtp_targets[:, :-2].reshape(-1)
-                    )
+            logits, mtp_logits = model(ids, images=images)
+            targets = ids.roll(-1, dims=1)
+            loss = F.cross_entropy(logits[:, :-1].reshape(-1, cfg.vocab_size), targets[:, :-1].reshape(-1))
+            if mtp_logits is not None:
+                mtp_targets = ids.roll(-2, dims=1)
+                loss = loss + 0.1 * F.cross_entropy(
+                    mtp_logits[:, :-2].reshape(-1, cfg.vocab_size), mtp_targets[:, :-2].reshape(-1)
+                )
 
-                accelerator.backward(loss)
-                opt.step()
-                opt.zero_grad()
+            accelerator.backward(loss)
+            opt.step()
+            opt.zero_grad()
 
             if accelerator.is_main_process:
                 loss_val = loss.item()

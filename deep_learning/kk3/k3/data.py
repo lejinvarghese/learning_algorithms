@@ -47,4 +47,4 @@ class ToyMultimodalDataset(Dataset):
         raw = caption.encode("utf-8")[: self.seq_len]
         ids = torch.zeros(self.seq_len, dtype=torch.long)
         ids[: len(raw)] = torch.tensor(list(raw), dtype=torch.long)
-        return ids, render_image(color, position, self.image_size)
+        return ids, render_image(color, position, self.image_size).unsqueeze(0)
