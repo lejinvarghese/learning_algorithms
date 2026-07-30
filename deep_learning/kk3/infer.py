@@ -21,7 +21,8 @@ from k3 import K3Model
 
 def load_checkpoint(ckpt_path: str, device: str):
     """Load model from checkpoint."""
-    ckpt = torch.load(ckpt_path, map_location=device)
+    # weights_only=False is safe for your own checkpoints
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
     cfg = ckpt["config"]
     model = K3Model(cfg).to(device)
     model.load_state_dict(ckpt["model_state_dict"])
@@ -70,7 +71,7 @@ def generate(
     prompt_ids: torch.Tensor,
     images: torch.Tensor = None,
     max_new_tokens: int = 64,
-    temperature: float = 1.0,
+    temperature: float = 0.1,
     device: str = "cuda"
 ):
     """Generate text continuation."""

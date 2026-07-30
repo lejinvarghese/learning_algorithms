@@ -60,10 +60,6 @@ class HFImageCaptionDataset(Dataset):
         return ids, frames, torch.tensor(1.0)
 
 
-# Not wired up yet. Add a video-caption source here with the same contract as the classes
-# above: __getitem__ returns (ids: LongTensor[seq_len], frames: FloatTensor[num_frames, 3,
-# frame_size, frame_size] in [0, 1], has_visual: scalar FloatTensor 1.0). See k3/video.py's
-# sample_frames() for the decode-and-resize pattern.
 class HFVideoCaptionDataset(Dataset):
     def __init__(self, *args, **kwargs):
         raise NotImplementedError

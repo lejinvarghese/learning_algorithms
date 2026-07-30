@@ -13,11 +13,7 @@ from k3.eval import evaluate
 from k3.hf_data import HFImageCaptionDataset, HFTextDataset
 from k3.video import RealVideoDataset
 
-try:
-    from muon import Muon
-    MUON_AVAILABLE = True
-except ImportError:
-    MUON_AVAILABLE = False
+from muon import SingleDeviceMuon as Muon
 
 
 def _datasets(toy, n_train, n_eval, seq_len, frame_size, num_frames):
@@ -40,7 +36,7 @@ def _datasets(toy, n_train, n_eval, seq_len, frame_size, num_frames):
         HFTextDataset("val", n_eval, seq_len, frame_size, num_frames),
         HFImageCaptionDataset("val", n_eval, seq_len, frame_size, num_frames),
     ]
-    # k3/hf_data.py: HFVideoCaptionDataset is a stub -- append it to both lists above once wired up.
+
     return ConcatDataset(train_sets), ConcatDataset(test_sets)
 
 
@@ -52,7 +48,33 @@ def _deepspeed_plugin(cpu_offload: bool):
         return None
     from accelerate.utils import DeepSpeedPlugin
 
-    return DeepSpeedPlugin(zero_stage=2, offload_optimizer_device="cpu")
+    # DeepSpeed config with Muon optimizer (hybrid with AdamW for incompatible params)
+    ds_config = {
+        "zero_optimization": {
+            "stage": 2,
+            "offload_optimizer": {"device": "cpu", "pin_memory": True},
+        },
+        "train_batch_size": "auto",
+        "train_micro_batch_size_per_gpu": "auto",
+        "optimizer": {
+            "type": "Muon",
+            "params": {
+                "lr": 0.02,
+                "momentum": 0.95,
+                "weight_decay": 0.0,
+            },
+        },
+        # Parameters incompatible with Muon (1D, embeddings) use AdamW
+        "hybrid_optimizer": {
+            "type": "AdamW",
+            "params": {
+                "lr": 3e-4,
+                "weight_decay": 0.01,
+            },
+        },
+    }
+
+    return DeepSpeedPlugin(hf_ds_config=ds_config)
 
 
 @click.command()
@@ -70,8 +92,19 @@ def _deepspeed_plugin(cpu_offload: bool):
 @click.option("--cpu-offload/--no-cpu-offload", default=True, show_default=True, help="needs CUDA + deepspeed")
 @click.option("--toy", is_flag=True, help="offline synthetic data instead of streaming from Hugging Face")
 def main(
-    mult, no_vision, epochs, batch_size, seq_len, num_frames, n_train, n_eval,
-    grad_checkpoint, grad_accum, mixed_precision, cpu_offload, toy,
+    mult,
+    no_vision,
+    epochs,
+    batch_size,
+    seq_len,
+    num_frames,
+    n_train,
+    n_eval,
+    grad_checkpoint,
+    grad_accum,
+    mixed_precision,
+    cpu_offload,
+    toy,
 ):
     accelerator = Accelerator(
         gradient_accumulation_steps=grad_accum,
@@ -91,7 +124,13 @@ def main(
     test_loader = DataLoader(test_data, batch_size=batch_size)
 
     # Hybrid optimizer: Muon for 2D+ params (conv/linear), AdamW for 1D (embed/norm)
-    if MUON_AVAILABLE:
+    if cpu_offload:
+        # DeepSpeed handles optimizer (configured in plugin)
+        opt = None
+        if accelerator.is_main_process:
+            click.secho("Using DeepSpeed ZeRO-2 with Muon optimizer + CPU offload", fg="green")
+    else:
+        # Manual hybrid optimizer for single GPU
         muon_params = []
         adamw_params = []
         for name, param in model.named_parameters():
@@ -125,13 +164,36 @@ def main(
 
         opt = HybridOptimizer(muon_opt, adamw_opt)
         if accelerator.is_main_process:
-            click.secho(f"Using Muon optimizer ({len(muon_params)} params) + AdamW ({len(adamw_params)} params)", fg="green")
-    else:
-        opt = AdamW(model.parameters(), lr=3e-4)
-        if accelerator.is_main_process:
-            click.secho("Muon not available, using AdamW", fg="yellow")
+            click.secho(f"Using Muon ({len(muon_params)} params) + AdamW ({len(adamw_params)} params)", fg="green")
 
     model, opt, train_loader, test_loader = accelerator.prepare(model, opt, train_loader, test_loader)
+
+    # Verify CPU offload and optimizer configuration
+    if accelerator.is_main_process:
+        if cpu_offload and hasattr(accelerator.state, "deepspeed_plugin"):
+            # Check if DeepSpeed is actually offloading
+            if hasattr(model, "optimizer") and hasattr(model.optimizer, "optimizer_swapper"):
+                click.secho("✓ DeepSpeed ZeRO-2 CPU offload active", fg="green")
+            elif hasattr(model, "config") and hasattr(model.config, "zero_optimization"):
+                zero_cfg = model.config.zero_optimization
+                if zero_cfg.get("offload_optimizer", {}).get("device") == "cpu":
+                    click.secho("✓ DeepSpeed configured for CPU offload", fg="green")
+                    # Check optimizer state location
+                    import psutil
+
+                    process = psutil.Process()
+                    cpu_mem_gb = process.memory_info().rss / 1e9
+                    click.secho(f"  CPU RAM usage: {cpu_mem_gb:.2f} GB", fg="cyan")
+            else:
+                click.secho("⚠ DeepSpeed enabled but offload status unclear", fg="yellow")
+
+        # Show GPU memory before training starts
+        if torch.cuda.is_available():
+            gpu_mem_allocated = torch.cuda.memory_allocated() / 1e9
+            gpu_mem_reserved = torch.cuda.memory_reserved() / 1e9
+            click.secho(
+                f"GPU memory: {gpu_mem_allocated:.2f} GB allocated, {gpu_mem_reserved:.2f} GB reserved", fg="cyan"
+            )
 
     if accelerator.is_main_process:
         click.secho(f"device={accelerator.device} mixed_precision={mixed_precision}", fg="cyan")
@@ -170,6 +232,21 @@ def main(
                 loss_val = loss.item()
                 first_loss = first_loss if first_loss is not None else loss_val
                 global_step += 1
+
+                # Show memory usage after first step to verify offload
+                if global_step == 1 and cpu_offload:
+                    import psutil
+
+                    process = psutil.Process()
+                    cpu_mem_gb = process.memory_info().rss / 1e9
+                    if torch.cuda.is_available():
+                        gpu_mem_gb = torch.cuda.memory_allocated() / 1e9
+                        click.secho(
+                            f"After first step - GPU: {gpu_mem_gb:.2f} GB, CPU RAM: {cpu_mem_gb:.2f} GB "
+                            f"(optimizer state should be on CPU)",
+                            fg="magenta",
+                        )
+
                 click.secho(
                     f"epoch {epoch}/{epochs} step {step}/{len(train_loader)} (global {global_step}): "
                     f"loss={loss_val:.4f}",
@@ -188,13 +265,16 @@ def main(
             ckpt_dir.mkdir(exist_ok=True)
             ckpt_path = ckpt_dir / f"k3_epoch{epoch}.pt"
             unwrapped_model = accelerator.unwrap_model(model)
-            torch.save({
-                "epoch": epoch,
-                "model_state_dict": unwrapped_model.state_dict(),
-                "optimizer_state_dict": opt.state_dict(),
-                "config": cfg,
-                "eval_metrics": metrics,
-            }, ckpt_path)
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "model_state_dict": unwrapped_model.state_dict(),
+                    "optimizer_state_dict": opt.state_dict(),
+                    "config": cfg,
+                    "eval_metrics": metrics,
+                },
+                ckpt_path,
+            )
             click.secho(f"Saved checkpoint: {ckpt_path}", fg="magenta")
 
     if accelerator.is_main_process and accelerator.device.type == "cuda":

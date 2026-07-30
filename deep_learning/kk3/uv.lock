@@ -608,6 +608,7 @@ dependencies = [
     { name = "muon-optimizer" },
     { name = "numpy" },
     { name = "pillow" },
+    { name = "psutil" },
     { name = "torch" },
     { name = "transformers" },
 ]
@@ -623,6 +624,7 @@ requires-dist = [
     { name = "muon-optimizer", git = "https://github.com/KellerJordan/Muon" },
     { name = "numpy", specifier = ">=1.25.0" },
     { name = "pillow", specifier = ">=10.0.0" },
+    { name = "psutil", specifier = ">=5.9.0" },
     { name = "torch", specifier = ">=2.3.0", index = "https://download.pytorch.org/whl/cu124" },
     { name = "transformers", specifier = ">=4.40.0" },
 ]
