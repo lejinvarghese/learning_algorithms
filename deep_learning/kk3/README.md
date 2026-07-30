@@ -83,3 +83,34 @@ apply (checkpointing costs a bit of recompute even when memory isn't tight; `--c
 silent no-op without CUDA). Training runs via [Accelerate](https://huggingface.co/docs/accelerate),
 so `python train.py` is enough for CPU, MPS, or a single GPU — `accelerate launch` is only needed
 for multi-GPU.
+
+Checkpoints are saved after each epoch to `checkpoints/k3_epoch{N}.pt`, containing model weights,
+optimizer state, config, and eval metrics.
+
+## Inference
+
+After training, use `infer.py` to generate text or captions:
+
+**Text completion:**
+```bash
+python infer.py --checkpoint checkpoints/k3_epoch3.pt --text "hello world"
+```
+
+**Image captioning:**
+```bash
+python infer.py --checkpoint checkpoints/k3_epoch3.pt --image photo.jpg
+```
+
+**Image captioning with prompt:**
+```bash
+python infer.py --checkpoint checkpoints/k3_epoch3.pt --image photo.jpg --text "a photo of"
+```
+
+**Options:**
+- `--max-tokens`: Maximum tokens to generate (default: 64)
+- `--temperature`: Sampling temperature, higher = more random (default: 0.8)
+- `--device`: Force device (auto-detects CUDA/MPS/CPU if not specified)
+
+The model generates byte-level sequences (UTF-8 encoding), so output is character-by-character
+rather than tokenized words. For image captioning, vision embeddings are added to text embeddings
+as continuous features (not discrete tokens), conditioning the generation on the image.

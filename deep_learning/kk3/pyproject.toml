@@ -1,0 +1,27 @@
+[project]
+name = "kk3"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.3.0",
+    "click>=8.0.0",
+    "accelerate>=0.30",
+    "transformers>=4.40.0",
+    "av>=12.0.0",
+    "numpy>=1.25.0",
+    "deepspeed>=0.14.0",
+    "datasets>=2.19.0",
+    "pillow>=10.0.0",
+    "mpi4py>=4.0.0",
+    "muon-optimizer @ git+https://github.com/KellerJordan/Muon",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }

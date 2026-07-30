@@ -1,6 +1,8 @@
 import click
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
+from pathlib import Path
 from accelerate import Accelerator
 from torch.optim import AdamW
 from torch.utils.data import ConcatDataset, DataLoader
@@ -10,6 +12,12 @@ from k3.data import ToyMultimodalDataset
 from k3.eval import evaluate
 from k3.hf_data import HFImageCaptionDataset, HFTextDataset
 from k3.video import RealVideoDataset
+
+try:
+    from muon import Muon
+    MUON_AVAILABLE = True
+except ImportError:
+    MUON_AVAILABLE = False
 
 
 def _datasets(toy, n_train, n_eval, seq_len, frame_size, num_frames):
@@ -54,8 +62,8 @@ def _deepspeed_plugin(cpu_offload: bool):
 @click.option("--batch-size", type=int, default=4, show_default=True)
 @click.option("--seq-len", type=int, default=32, show_default=True)
 @click.option("--num-frames", type=int, default=4, show_default=True, help="frames per video clip / per image")
-@click.option("--n-train", type=int, default=32, show_default=True, help="samples per source, training split")
-@click.option("--n-eval", type=int, default=8, show_default=True, help="samples per source, eval split")
+@click.option("--n-train", type=int, default=10_000, show_default=True, help="samples per source, training split")
+@click.option("--n-eval", type=int, default=1_000, show_default=True, help="samples per source, eval split")
 @click.option("--grad-checkpoint/--no-grad-checkpoint", default=True, show_default=True)
 @click.option("--grad-accum", type=int, default=1, show_default=True, help="steps to accumulate before an update")
 @click.option("--mixed-precision", type=click.Choice(["no", "fp16", "bf16"]), default="no", show_default=True)
@@ -81,7 +89,47 @@ def main(
     train_data, test_data = _datasets(toy, n_train, n_eval, seq_len, frame_size, num_frames)
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, drop_last=True)
     test_loader = DataLoader(test_data, batch_size=batch_size)
-    opt = AdamW(model.parameters(), lr=3e-4)
+
+    # Hybrid optimizer: Muon for 2D+ params (conv/linear), AdamW for 1D (embed/norm)
+    if MUON_AVAILABLE:
+        muon_params = []
+        adamw_params = []
+        for name, param in model.named_parameters():
+            if param.ndim >= 2 and "embed" not in name.lower():
+                muon_params.append(param)
+            else:
+                adamw_params.append(param)
+
+        muon_opt = Muon(muon_params, lr=0.02, momentum=0.95)
+        adamw_opt = AdamW(adamw_params, lr=3e-4)
+
+        class HybridOptimizer:
+            def __init__(self, muon, adamw):
+                self.muon = muon
+                self.adamw = adamw
+
+            def step(self):
+                self.muon.step()
+                self.adamw.step()
+
+            def zero_grad(self):
+                self.muon.zero_grad()
+                self.adamw.zero_grad()
+
+            def state_dict(self):
+                return {"muon": self.muon.state_dict(), "adamw": self.adamw.state_dict()}
+
+            def load_state_dict(self, state_dict):
+                self.muon.load_state_dict(state_dict["muon"])
+                self.adamw.load_state_dict(state_dict["adamw"])
+
+        opt = HybridOptimizer(muon_opt, adamw_opt)
+        if accelerator.is_main_process:
+            click.secho(f"Using Muon optimizer ({len(muon_params)} params) + AdamW ({len(adamw_params)} params)", fg="green")
+    else:
+        opt = AdamW(model.parameters(), lr=3e-4)
+        if accelerator.is_main_process:
+            click.secho("Muon not available, using AdamW", fg="yellow")
 
     model, opt, train_loader, test_loader = accelerator.prepare(model, opt, train_loader, test_loader)
 
@@ -134,6 +182,20 @@ def main(
                 f"epoch {epoch}/{epochs} eval: loss={metrics['loss']:.4f} accuracy={metrics['accuracy']:.2%}",
                 fg="blue",
             )
+
+            # Save checkpoint
+            ckpt_dir = Path("checkpoints")
+            ckpt_dir.mkdir(exist_ok=True)
+            ckpt_path = ckpt_dir / f"k3_epoch{epoch}.pt"
+            unwrapped_model = accelerator.unwrap_model(model)
+            torch.save({
+                "epoch": epoch,
+                "model_state_dict": unwrapped_model.state_dict(),
+                "optimizer_state_dict": opt.state_dict(),
+                "config": cfg,
+                "eval_metrics": metrics,
+            }, ckpt_path)
+            click.secho(f"Saved checkpoint: {ckpt_path}", fg="magenta")
 
     if accelerator.is_main_process and accelerator.device.type == "cuda":
         click.secho(f"peak CUDA memory: {torch.cuda.max_memory_allocated() / 1e9:.2f} GB", fg="magenta")

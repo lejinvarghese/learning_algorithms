@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
-from datasets import load_dataset
+from datasets import Dataset as HFDataset, load_dataset
 from torch.utils.data import Dataset
 
 
@@ -17,38 +17,41 @@ class HFTextDataset(Dataset):
         self, split: str = "train", n_samples: int = 32, seq_len: int = 32,
         frame_size: int = 112, num_frames: int = 8,
     ):
-        split = {"train": "train", "val": "validation", "test": "test"}[split]
-        stream = load_dataset("Salesforce/wikitext", "wikitext-2-raw-v1", split=split, streaming=True)
-        stream = stream.filter(lambda r: len(r["text"].strip()) > 20)
-        self.samples = [r["text"] for r in stream.take(n_samples)]
+        split_name = {"train": "train", "val": "validation", "test": "test"}[split]
+        ds = load_dataset("Salesforce/wikitext", "wikitext-2-raw-v1", split=split_name)
+        assert isinstance(ds, HFDataset), f"Expected Dataset, got {type(ds)}"
+        ds = ds.filter(lambda r: len(r["text"].strip()) > 20)
+        self.ds: HFDataset = ds.select(range(min(n_samples, len(ds))))
         self.seq_len, self.frame_size, self.num_frames = seq_len, frame_size, num_frames
 
     def __len__(self) -> int:
-        return len(self.samples)
+        return len(self.ds)
 
     def __getitem__(self, idx: int):
-        ids = _encode(self.samples[idx], self.seq_len)
+        ids = _encode(self.ds[idx]["text"], self.seq_len)
         frames = torch.zeros(self.num_frames, 3, self.frame_size, self.frame_size)
         return ids, frames, torch.tensor(0.0)
 
 
 class HFImageCaptionDataset(Dataset):
-    _TRAIN_POOL = 512  # svjack/pokemon-blip-captions-en-zh has ~833 rows in its one "train" split
+    _TRAIN_POOL = 700  # svjack/pokemon-blip-captions-en-zh has 833 rows: 700 train / 133 eval
 
     def __init__(
         self, split: str = "train", n_samples: int = 32, seq_len: int = 32,
         frame_size: int = 112, num_frames: int = 8,
     ):
-        stream = load_dataset("svjack/pokemon-blip-captions-en-zh", split="train", streaming=True)
+        ds = load_dataset("svjack/pokemon-blip-captions-en-zh", split="train")
+        assert isinstance(ds, HFDataset), f"Expected Dataset, got {type(ds)}"
         offset = 0 if split == "train" else self._TRAIN_POOL
-        self.samples = list(stream.skip(offset).take(n_samples))
+        end_idx = min(offset + n_samples, len(ds))
+        self.ds: HFDataset = ds.select(range(offset, end_idx))
         self.seq_len, self.frame_size, self.num_frames = seq_len, frame_size, num_frames
 
     def __len__(self) -> int:
-        return len(self.samples)
+        return len(self.ds)
 
     def __getitem__(self, idx: int):
-        row = self.samples[idx]
+        row = self.ds[idx]
         ids = _encode(row["en_text"], self.seq_len)
 
         img = torch.from_numpy(np.array(row["image"].convert("RGB"))).permute(2, 0, 1).float() / 255.0
