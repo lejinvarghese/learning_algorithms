@@ -3,11 +3,37 @@ import torch
 import torch.nn.functional as F
 from accelerate import Accelerator
 from torch.optim import AdamW
-from torch.utils.data import DataLoader
+from torch.utils.data import ConcatDataset, DataLoader
 
 from k3 import K3Config, K3Model
 from k3.data import ToyMultimodalDataset
 from k3.eval import evaluate
+from k3.hf_data import HFImageCaptionDataset, HFTextDataset
+from k3.video import RealVideoDataset
+
+
+def _datasets(toy, n_train, n_eval, seq_len, frame_size, num_frames):
+    if toy:
+        train_sets = [
+            ToyMultimodalDataset(32, seq_len, frame_size, num_frames, seed=0),
+            RealVideoDataset(num_frames, frame_size, seq_len, split="train"),
+        ]
+        test_sets = [
+            ToyMultimodalDataset(16, seq_len, frame_size, num_frames, seed=1),
+            RealVideoDataset(num_frames, frame_size, seq_len, split="test"),
+        ]
+        return ConcatDataset(train_sets), ConcatDataset(test_sets)
+
+    train_sets = [
+        HFTextDataset("train", n_train, seq_len, frame_size, num_frames),
+        HFImageCaptionDataset("train", n_train, seq_len, frame_size, num_frames),
+    ]
+    test_sets = [
+        HFTextDataset("val", n_eval, seq_len, frame_size, num_frames),
+        HFImageCaptionDataset("val", n_eval, seq_len, frame_size, num_frames),
+    ]
+    # k3/hf_data.py: HFVideoCaptionDataset is a stub -- append it to both lists above once wired up.
+    return ConcatDataset(train_sets), ConcatDataset(test_sets)
 
 
 def _deepspeed_plugin(cpu_offload: bool):
@@ -27,24 +53,32 @@ def _deepspeed_plugin(cpu_offload: bool):
 @click.option("--epochs", type=int, default=3, show_default=True)
 @click.option("--batch-size", type=int, default=4, show_default=True)
 @click.option("--seq-len", type=int, default=32, show_default=True)
-@click.option("--grad-checkpoint", is_flag=True, help="recompute activations on backward to cut peak memory")
+@click.option("--num-frames", type=int, default=4, show_default=True, help="frames per video clip / per image")
+@click.option("--n-train", type=int, default=32, show_default=True, help="samples per source, training split")
+@click.option("--n-eval", type=int, default=8, show_default=True, help="samples per source, eval split")
+@click.option("--grad-checkpoint/--no-grad-checkpoint", default=True, show_default=True)
 @click.option("--grad-accum", type=int, default=1, show_default=True, help="steps to accumulate before an update")
 @click.option("--mixed-precision", type=click.Choice(["no", "fp16", "bf16"]), default="no", show_default=True)
-@click.option("--cpu-offload", is_flag=True, help="ZeRO-Offload optimizer state to CPU RAM (needs CUDA + deepspeed)")
-def main(mult, no_vision, epochs, batch_size, seq_len, grad_checkpoint, grad_accum, mixed_precision, cpu_offload):
+@click.option("--cpu-offload/--no-cpu-offload", default=True, show_default=True, help="needs CUDA + deepspeed")
+@click.option("--toy", is_flag=True, help="offline synthetic data instead of streaming from Hugging Face")
+def main(
+    mult, no_vision, epochs, batch_size, seq_len, num_frames, n_train, n_eval,
+    grad_checkpoint, grad_accum, mixed_precision, cpu_offload, toy,
+):
     accelerator = Accelerator(
         gradient_accumulation_steps=grad_accum,
         mixed_precision=mixed_precision,
         deepspeed_plugin=_deepspeed_plugin(cpu_offload),
     )
 
-    cfg = K3Config.scaled(mult, use_vision=not no_vision, use_gradient_checkpointing=grad_checkpoint)
+    cfg = K3Config.scaled(
+        mult, use_vision=not no_vision, use_gradient_checkpointing=grad_checkpoint, vit_num_frames=num_frames
+    )
     model = K3Model(cfg)
     counts = model.param_counts()
 
-    image_size = cfg.vit_patch_size * 8
-    train_data = ToyMultimodalDataset(n_samples=32, seq_len=seq_len, image_size=image_size, seed=0)
-    test_data = ToyMultimodalDataset(n_samples=16, seq_len=seq_len, image_size=image_size, seed=1)
+    frame_size = cfg.vit_patch_size * 8
+    train_data, test_data = _datasets(toy, n_train, n_eval, seq_len, frame_size, num_frames)
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, drop_last=True)
     test_loader = DataLoader(test_data, batch_size=batch_size)
     opt = AdamW(model.parameters(), lr=3e-4)
@@ -59,6 +93,7 @@ def main(mult, no_vision, epochs, batch_size, seq_len, grad_checkpoint, grad_acc
             f"vocab={cfg.vocab_size} vision={cfg.use_vision}",
             fg="cyan",
         )
+        click.secho(f"train samples: {len(train_data)}  eval samples: {len(test_data)}", fg="cyan")
         click.secho(f"total params:     {counts['total'] / 1e6:8.2f} M", fg="yellow")
         click.secho(
             f"activated approx: {counts['activated_approx'] / 1e6:8.2f} M  "
@@ -68,10 +103,9 @@ def main(mult, no_vision, epochs, batch_size, seq_len, grad_checkpoint, grad_acc
 
     first_loss, global_step = None, 0
     for epoch in range(1, epochs + 1):
-        for step, (ids, images) in enumerate(train_loader, start=1):
-            images = images if cfg.use_vision else None
+        for step, (ids, images, has_visual) in enumerate(train_loader, start=1):
             with accelerator.accumulate(model):
-                logits, mtp_logits = model(ids, images=images)
+                logits, mtp_logits = model(ids, images=images, has_visual=has_visual)
                 targets = ids.roll(-1, dims=1)
                 loss = F.cross_entropy(logits[:, :-1].reshape(-1, cfg.vocab_size), targets[:, :-1].reshape(-1))
                 if mtp_logits is not None:

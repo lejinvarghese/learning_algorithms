@@ -15,10 +15,10 @@ comfortably on modest hardware.
 | Stable LatentMoE: shared + latent-space routed experts | `layers.py: StableLatentMoE` |
 | SiTU-GLU: dual-softcap gated linear unit | `layers.py: SiTUGLU` |
 | Quantile Balancing: auxiliary-loss-free routing bias | `layers.py: QuantileBalancingRouter` |
-| Native vision: ViT, token merging, projector into the shared embedding space | `model.py: MoonViT` |
+| Native vision, images and video: factorized spatial/temporal attention, temporal pooling, token merging | `model.py: MoonViT` |
 | Multi-token prediction head | `model.py: MTPHead` |
 
-What's simplified, and why it doesn't change the shape:
+Simplifications, and why they don't change the shape:
 - **KDA's recurrence** is a plain sequential loop rather than a chunked parallel kernel — same
   math, just without the throughput optimization that only matters at long sequence lengths.
 - **Expert dispatch** is a dense masked loop rather than a scatter/gather kernel — fine when the
@@ -26,8 +26,7 @@ What's simplified, and why it doesn't change the shape:
 - **Quantile Balancing** computes an exact quantile rather than approximating one from a
   cross-rank histogram — the histogram exists only to make the quantile affordable when sharding
   a huge expert pool across many devices; computed directly, it's the identical update.
-- **Vision** is single-image, flat-patch ViT — factorized frame-to-frame attention for video is
-  left out, though the token-merging step that keeps long multimodal sequences affordable is kept.
+- No audio — Kimi K3 itself has no audio modality (text + native vision only).
 
 ## Scaling
 
@@ -46,19 +45,41 @@ model = K3Model(cfg)
 
 Or override any field directly: `K3Config(hidden_dim=192, num_routed_experts=16, ...)`.
 
-## Run
+## Data
 
-Trains on `k3/data.py`'s tiny procedural dataset: colored-block images paired with byte-tokenized
-captions describing them (e.g. "a red square in the top-left") — no download required, just
-enough signal to confirm the vision splice and text loss are both learning. Each epoch logs
-per-step training loss, then evaluates on a held-out split (`k3/eval.py: evaluate`) and logs
-loss and next-token accuracy on unseen samples.
+`train.py` trains on one combined dataset streamed from Hugging Face (`k3/hf_data.py`):
+[Salesforce/wikitext](https://huggingface.co/datasets/Salesforce/wikitext) (text) and
+[svjack/pokemon-blip-captions-en-zh](https://huggingface.co/datasets/svjack/pokemon-blip-captions-en-zh)
+(image + caption). Every sample — text-only or image-paired — is shaped identically
+(`ids`, `frames: [num_frames, 3, H, W]`, `has_visual`) so they batch together in one `DataLoader`;
+text-only samples carry an all-zero frame tensor and `has_visual=0`, which zeroes out the vision
+contribution in `K3Model.forward` for that sample. A video-caption source isn't wired up yet —
+`k3/hf_data.py: HFVideoCaptionDataset` is a stub documenting the exact contract to fill in.
+
+`--toy` switches to fully offline data instead: `k3/data.py`'s procedural colored-block images
+and `k3/video.py`'s four small cached real video clips — no network dependency, useful for a
+quick sanity check or CI.
+
+## Run
 
 ```bash
 pip install -r requirements.txt
-python train.py                # builds the model, prints param counts, trains for a few epochs
-python train.py --epochs 10    # train longer
-python train.py --mult 0.5     # scale down further
-python train.py --no-vision    # drop the vision tower
-python train.py --help         # full option list
+python train.py                       # streams text + image data from Hugging Face
+python train.py --n-train 128          # a larger pull from each source
+python train.py --toy                  # fully offline instead
+python train.py --mult 0.5             # scale the model down further
+python train.py --no-vision            # drop the vision tower
+python train.py --grad-checkpoint      # recompute attention activations on backward (lower peak memory)
+python train.py --mixed-precision bf16 # fp16/bf16 training via Accelerate
+python train.py --cpu-offload          # DeepSpeed ZeRO-2 optimizer offload (needs CUDA + requirements-cuda.txt)
+python train.py --help                 # full option list
 ```
+
+Each epoch logs per-step training loss, then evaluates on a held-out split (`k3/eval.py:
+evaluate`) and logs loss and next-token accuracy on unseen samples.
+
+`--grad-checkpoint` and `--cpu-offload` default **on**; both degrade gracefully where they don't
+apply (checkpointing costs a bit of recompute even when memory isn't tight; `--cpu-offload` is a
+silent no-op without CUDA). Training runs via [Accelerate](https://huggingface.co/docs/accelerate),
+so `python train.py` is enough for CPU, MPS, or a single GPU — `accelerate launch` is only needed
+for multi-GPU.

@@ -3,3 +3,5 @@ click>=8.1
 av>=11
 numpy
 accelerate>=0.30
+datasets>=2.19
+pillow

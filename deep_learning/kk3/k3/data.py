@@ -1,7 +1,3 @@
-# A tiny procedural (caption, image) dataset for a training smoke test: a colored block on a
-# canvas paired with a caption describing it. Pure torch, no downloads -- image content
-# actually correlates with the caption, enough to confirm the vision splice and text loss are
-# both learning something, not just running.
 import random
 
 import torch
@@ -30,12 +26,13 @@ def render_image(color: str, position: str, size: int = 112) -> torch.Tensor:
     return img
 
 
-# `n_samples` (caption, image) pairs; captions are byte-encoded so no external tokenizer or
-# vocab file is needed.
 class ToyMultimodalDataset(Dataset):
-    def __init__(self, n_samples: int = 32, seq_len: int = 32, image_size: int = 112, seed: int = 0):
+    def __init__(
+        self, n_samples: int = 32, seq_len: int = 32, image_size: int = 112,
+        num_frames: int = 8, seed: int = 0,
+    ):
         rng = random.Random(seed)
-        self.seq_len, self.image_size = seq_len, image_size
+        self.seq_len, self.image_size, self.num_frames = seq_len, image_size, num_frames
         self.samples = [(rng.choice(list(COLORS)), rng.choice(POSITIONS)) for _ in range(n_samples)]
 
     def __len__(self) -> int:
@@ -47,4 +44,5 @@ class ToyMultimodalDataset(Dataset):
         raw = caption.encode("utf-8")[: self.seq_len]
         ids = torch.zeros(self.seq_len, dtype=torch.long)
         ids[: len(raw)] = torch.tensor(list(raw), dtype=torch.long)
-        return ids, render_image(color, position, self.image_size).unsqueeze(0)
+        frames = render_image(color, position, self.image_size).unsqueeze(0).repeat(self.num_frames, 1, 1, 1)
+        return ids, frames, torch.tensor(1.0)

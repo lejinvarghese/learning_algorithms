@@ -56,4 +56,4 @@ class RealVideoDataset(Dataset):
         raw = caption.encode("utf-8")[: self.seq_len]
         ids = torch.zeros(self.seq_len, dtype=torch.long)
         ids[: len(raw)] = torch.tensor(list(raw), dtype=torch.long)
-        return ids, sample_frames(path, self.num_frames, self.frame_size)
+        return ids, sample_frames(path, self.num_frames, self.frame_size), torch.tensor(1.0)

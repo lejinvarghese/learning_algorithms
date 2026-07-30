@@ -9,11 +9,10 @@ from torch.utils.data import DataLoader
 def evaluate(model, loader: DataLoader, vocab_size: int, device: str) -> dict:
     model.eval()
     total_loss, total_tokens, correct = 0.0, 0, 0
-    for ids, images in loader:
-        ids = ids.to(device)
-        images = images.to(device) if model.vision is not None else None
+    for ids, images, has_visual in loader:
+        ids, images, has_visual = ids.to(device), images.to(device), has_visual.to(device)
 
-        logits, _ = model(ids, images=images)
+        logits, _ = model(ids, images=images, has_visual=has_visual)
         targets = ids.roll(-1, dims=1)[:, :-1]
         logits = logits[:, :-1]
 

@@ -146,10 +146,18 @@ class K3Model(nn.Module):
 
         nn.init.normal_(self.embed.weight, mean=0.0, std=0.02)
 
-    def forward(self, input_ids: torch.Tensor, images: Optional[torch.Tensor] = None):
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        images: Optional[torch.Tensor] = None,
+        has_visual: Optional[torch.Tensor] = None,
+    ):
         x = self.embed_norm(self.embed(input_ids))
         if images is not None and self.vision is not None:
-            x = x + self.vision(images).mean(1, keepdim=True)
+            vis = self.vision(images).mean(1, keepdim=True)
+            if has_visual is not None:
+                vis = vis * has_visual.view(-1, 1, 1)
+            x = x + vis
 
         block_reps = [x]
         for block in self.blocks:
