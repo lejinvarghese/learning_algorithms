@@ -38,40 +38,25 @@ def _deepspeed_plugin(cpu_offload: bool):
 
 
 @click.command()
-@click.option("--mult", type=float, default=1.0, show_default=True, help="scale factor over the default config")
-@click.option("--no-vision", is_flag=True, help="drop the vision tower")
-@click.option("--epochs", type=int, default=3, show_default=True)
-@click.option("--batch-size", type=int, default=4, show_default=True)
-@click.option("--seq-len", type=int, default=32, show_default=True)
-@click.option("--num-frames", type=int, default=4, show_default=True, help="frames per video clip / per image")
+@click.option("--epochs", type=int, default=3, show_default=True, help="number of training epochs")
+@click.option("--batch-size", type=int, default=4, show_default=True, help="training batch size")
 @click.option("--n-train", type=int, default=100_000, show_default=True, help="samples per source, training split")
-@click.option("--n-eval", type=int, default=1_000, show_default=True, help="samples per source, eval split")
-@click.option("--grad-checkpoint/--no-grad-checkpoint", default=True, show_default=True)
-@click.option("--grad-accum", type=int, default=1, show_default=True, help="steps to accumulate before an update")
-@click.option("--mixed-precision", type=click.Choice(["no", "fp16", "bf16"]), default="no", show_default=True)
-@click.option("--cpu-offload/--no-cpu-offload", default=True, show_default=True, help="use DeepSpeed ZeRO-2 (gradient sharding)")
-@click.option("--grad-clip", type=float, default=1.0, show_default=True, help="gradient clipping max norm")
-@click.option("--muon-lr", type=float, default=0.005, show_default=True, help="Muon optimizer learning rate")
-@click.option("--warmup-ratio", type=float, default=0.1, show_default=True, help="warmup as fraction of total steps")
-@click.option("--min-lr-ratio", type=float, default=0.1, show_default=True, help="minimum LR as fraction of peak LR")
-def main(
-    mult,
-    no_vision,
-    epochs,
-    batch_size,
-    seq_len,
-    num_frames,
-    n_train,
-    n_eval,
-    grad_checkpoint,
-    grad_accum,
-    mixed_precision,
-    cpu_offload,
-    grad_clip,
-    muon_lr,
-    warmup_ratio,
-    min_lr_ratio,
-):
+def main(epochs, batch_size, n_train):
+    # Hardcoded configuration
+    mult = 1.0
+    no_vision = False
+    seq_len = 32
+    num_frames = 4
+    n_eval = 1_000
+    grad_checkpoint = True
+    grad_accum = 1
+    mixed_precision = "no"
+    cpu_offload = True
+    grad_clip = 1.0
+    muon_lr = 0.005
+    warmup_ratio = 0.1
+    min_lr_ratio = 0.1
+
     accelerator = Accelerator(
         gradient_accumulation_steps=grad_accum,
         mixed_precision=mixed_precision,
