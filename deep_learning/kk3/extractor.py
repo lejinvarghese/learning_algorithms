@@ -137,8 +137,7 @@ class FineWebExtractor(DatasetExtractor):
                     yield {
                         "id": idx,
                         "text": row["text"],
-                        "modality": "text",
-                        "language": "en"
+                        "modality": "text"
                     }
 
             def valid_generator():
@@ -151,8 +150,7 @@ class FineWebExtractor(DatasetExtractor):
                     yield {
                         "id": idx - train_size,
                         "text": row["text"],
-                        "modality": "text",
-                        "language": "en"
+                        "modality": "text"
                     }
 
             def test_generator():
@@ -165,8 +163,7 @@ class FineWebExtractor(DatasetExtractor):
                     yield {
                         "id": idx - train_size - valid_size,
                         "text": row["text"],
-                        "modality": "text",
-                        "language": "en"
+                        "modality": "text"
                     }
 
             # Create datasets from generators
@@ -222,10 +219,9 @@ class COCOCaptionExtractor(DatasetExtractor):
                     row = ds[idx]
                     yield {
                         "id": idx,
-                        "text": row["caption"],
+                        "text": row["text"],  # Fixed: use "text" field not "caption"
                         "modality": "image",
                         "image": row["image"],
-                        "language": "en"
                     }
 
             def valid_generator():
@@ -233,10 +229,9 @@ class COCOCaptionExtractor(DatasetExtractor):
                     row = ds[train_size + idx]
                     yield {
                         "id": idx,
-                        "text": row["caption"],
+                        "text": row["text"],  # Fixed: use "text" field not "caption"
                         "modality": "image",
                         "image": row["image"],
-                        "language": "en"
                     }
 
             def test_generator():
@@ -244,10 +239,9 @@ class COCOCaptionExtractor(DatasetExtractor):
                     row = ds[train_size + valid_size + idx]
                     yield {
                         "id": idx,
-                        "text": row["caption"],
+                        "text": row["text"],  # Fixed: use "text" field not "caption"
                         "modality": "image",
                         "image": row["image"],
-                        "language": "en"
                     }
 
             # Create datasets from generators
@@ -286,78 +280,79 @@ class AudioSetExtractor(DatasetExtractor):
         return "audioset"
 
     def extract_to_dataset(self) -> DatasetDict:
-        """Memory-efficient extraction using generators."""
-        click.echo("🎵 Loading AudioSet (memory-efficient streaming)...")
+        click.echo("🎵 Loading AudioSet...")
         try:
-            # Load train split
-            ds = load_dataset("agkphysics/AudioSet", split="train")
+            train_size = 8000
+            valid_size = 1500
+            test_size = 500
 
-            # Sample sizes
-            total_available = len(ds)
-            train_size = min(30000, int(total_available * 0.8))
-            valid_size = min(5000, int(total_available * 0.15))
-            test_size = min(2500, total_available - train_size - valid_size)
+            click.echo(f"  Using {train_size + valid_size + test_size} samples")
 
-            click.echo(f"  Total available: {total_available}, using {train_size + valid_size + test_size}")
-
-            # Generator functions
             def train_generator():
-                for idx in tqdm(range(train_size), desc="AudioSet train"):
-                    row = ds[idx]
-                    # Convert human_labels list to comma-separated string
+                ds = load_dataset("agkphysics/AudioSet", "full", split="bal_train", streaming=True)
+                count = 0
+                for row in ds:
+                    if count >= train_size:
+                        break
                     labels = row.get("human_labels", [])
                     label_text = ", ".join(labels) if isinstance(labels, list) else str(labels)
-
                     audio_data = row.get("audio")
                     yield {
-                        "id": idx,
+                        "id": count,
                         "text": label_text,
                         "modality": "audio",
                         "audio": {
                             "array": audio_data["array"] if audio_data else None,
                             "sampling_rate": audio_data["sampling_rate"] if audio_data else None
                         },
-                        "language": "en"
                     }
+                    count += 1
 
             def valid_generator():
-                for idx in tqdm(range(valid_size), desc="AudioSet valid"):
-                    row = ds[train_size + idx]
+                ds = load_dataset("agkphysics/AudioSet", "full", split="eval", streaming=True)
+                count = 0
+                for row in ds:
+                    if count >= valid_size:
+                        break
                     labels = row.get("human_labels", [])
                     label_text = ", ".join(labels) if isinstance(labels, list) else str(labels)
-
                     audio_data = row.get("audio")
                     yield {
-                        "id": idx,
+                        "id": count,
                         "text": label_text,
                         "modality": "audio",
                         "audio": {
                             "array": audio_data["array"] if audio_data else None,
                             "sampling_rate": audio_data["sampling_rate"] if audio_data else None
                         },
-                        "language": "en"
                     }
+                    count += 1
 
             def test_generator():
-                for idx in tqdm(range(test_size), desc="AudioSet test"):
-                    row = ds[train_size + valid_size + idx]
+                ds = load_dataset("agkphysics/AudioSet", "full", split="eval", streaming=True)
+                count = 0
+                skip = 0
+                for row in ds:
+                    if skip < valid_size:
+                        skip += 1
+                        continue
+                    if count >= test_size:
+                        break
                     labels = row.get("human_labels", [])
                     label_text = ", ".join(labels) if isinstance(labels, list) else str(labels)
-
                     audio_data = row.get("audio")
                     yield {
-                        "id": idx,
+                        "id": count,
                         "text": label_text,
                         "modality": "audio",
                         "audio": {
                             "array": audio_data["array"] if audio_data else None,
                             "sampling_rate": audio_data["sampling_rate"] if audio_data else None
                         },
-                        "language": "en"
                     }
+                    count += 1
 
-            # Create datasets from generators
-            click.echo("  Converting to HF datasets (streaming)...")
+            click.echo("  Converting to HF datasets...")
             dataset_dict = DatasetDict({
                 "train": Dataset.from_generator(train_generator),
                 "valid": Dataset.from_generator(valid_generator),
@@ -366,12 +361,6 @@ class AudioSetExtractor(DatasetExtractor):
 
             total = sum(len(d) for d in dataset_dict.values())
             click.echo(f"✓ AudioSet: {total} samples (train:{len(dataset_dict['train'])}, valid:{len(dataset_dict['valid'])}, test:{len(dataset_dict['test'])})")
-
-            # Clean up
-            del ds
-            import gc
-            gc.collect()
-
             return dataset_dict
 
         except Exception as e:
@@ -411,14 +400,22 @@ def combine_datasets(
     output_dir.mkdir(parents=True, exist_ok=True)
     all_metadata = {}  # Only store metadata, not the full datasets
 
-    # Process ONE dataset at a time to keep RAM usage manageable
     for idx, extractor in enumerate(extractors, 1):
         config_name = extractor.get_config_name()
         click.echo(f"[{idx}/{len(extractors)}] 📦 Processing {config_name}...")
 
         try:
-            # Use extract_to_dataset() if available (memory-efficient generators)
-            # Otherwise fall back to extract() (old list-based method)
+            if push_to_hub and hub_name:
+                from huggingface_hub import HfApi
+                api = HfApi()
+                try:
+                    files = list(api.list_repo_files(hub_name, repo_type="dataset"))
+                    if any(f.startswith(f"{config_name}/") for f in files):
+                        click.secho(f"  ⏭  {config_name} already on HF, skipping", fg="yellow")
+                        continue
+                except Exception:
+                    pass
+
             if hasattr(extractor, 'extract_to_dataset'):
                 dataset_dict = extractor.extract_to_dataset()
             else:
@@ -453,32 +450,24 @@ def combine_datasets(
             dataset_dict.save_to_disk(str(config_dir))
             click.secho(f"  ✓ Saved to {config_dir}", fg="green")
 
-            # PUSH IMMEDIATELY to HuggingFace (if requested)
             if push_to_hub and hub_name:
-                click.echo(f"  📤 Pushing {config_name} to {hub_name}...")
                 try:
-                    dataset_dict.push_to_hub(
-                        hub_name,
-                        config_name=config_name,
-                        private=False
-                    )
-                    click.secho(f"  ✓ Pushed to HuggingFace", fg="green")
+                    click.echo(f"  📤 Pushing to {hub_name}...")
+                    dataset_dict.push_to_hub(hub_name, config_name=config_name, private=False)
+                    click.secho(f"  ✓ Pushed", fg="green")
                 except Exception as e:
                     click.secho(f"  ✗ Push failed: {e}", fg="red")
 
-            # Store metadata (NOT the full dataset)
             total = sum(len(d) for d in dataset_dict.values())
             all_metadata[config_name] = {
                 "total": total,
                 "splits": {k: len(v) for k, v in dataset_dict.items()}
             }
 
-            # Explicitly FREE MEMORY before next dataset
             del dataset_dict
             import gc
             gc.collect()
-
-            click.echo(f"  💾 Memory freed, ready for next dataset\n")
+            click.echo()
 
         except Exception as e:
             click.secho(f"✗ {config_name} failed: {e}", fg="red")
@@ -499,7 +488,7 @@ def combine_datasets(
 
 
 @click.command()
-@click.option("--cache-dir", type=click.Path(), default="./data_cache", help="Cache directory for downloads")
+@click.option("--cache-dir", type=click.Path(), default="/media/starscream/bumblebee1/hf_cache", help="Cache directory for downloads (default: bumblebee1, 235GB free)")
 @click.option("--output-dir", type=click.Path(), default="./unified_dataset", help="Output directory")
 @click.option("--num-workers", type=int, default=16, help="Number of parallel workers")
 @click.option("--datasets", type=str, default="fineweb,coco,audioset", help="Comma-separated list: fineweb,coco,audioset")
@@ -516,6 +505,13 @@ def main(cache_dir: str, output_dir: str, num_workers: int, datasets: str, push_
     """
     cache_path = Path(cache_dir)
     output_path = Path(output_dir)
+
+    # Configure HuggingFace cache to use local directory (avoid filling /home)
+    hf_cache = str(cache_path / "hf_cache")
+    os.environ["HF_HOME"] = hf_cache
+    os.environ["HF_DATASETS_CACHE"] = hf_cache
+    os.environ["TRANSFORMERS_CACHE"] = hf_cache
+    click.echo(f"📦 HuggingFace cache: {hf_cache}")
 
     click.echo("🚀 Multi-Dataset Multimodal Extractor")
     click.echo(f"Cache: {cache_path}")
@@ -558,14 +554,34 @@ def main(cache_dir: str, output_dir: str, num_workers: int, datasets: str, push_
         hub_name=hub_name
     )
 
-    # Print final summary
+    # Print final summary and upload README
     if push_to_hub and all_metadata:
         click.secho(f"\n✅ All {len(all_metadata)} configs uploaded to https://huggingface.co/datasets/{hub_name}", fg="green")
+
+        # Upload README.md dataset card
+        readme_path = Path("README.md")
+        if readme_path.exists():
+            click.echo("\n📄 Uploading dataset card (README.md)...")
+            try:
+                from huggingface_hub import HfApi
+                api = HfApi()
+                api.upload_file(
+                    path_or_fileobj=str(readme_path),
+                    path_in_repo="README.md",
+                    repo_id=hub_name,
+                    repo_type="dataset",
+                )
+                click.secho("  ✓ Dataset card uploaded", fg="green")
+            except Exception as e:
+                click.secho(f"  ⚠ Failed to upload README: {e}", fg="yellow")
+        else:
+            click.secho("  ⚠ README.md not found, skipping dataset card upload", fg="yellow")
+
         click.echo(f"\nUsage:")
         click.echo(f"  # Load specific config and split")
-        click.echo(f"  ds = load_dataset('{hub_name}', 'imagenet', split='train')")
+        click.echo(f"  ds = load_dataset('{hub_name}', 'coco', split='train')")
         click.echo(f"  # Load all splits of a config")
-        click.echo(f"  ds = load_dataset('{hub_name}', 'imagenet')")
+        click.echo(f"  ds = load_dataset('{hub_name}', 'fineweb')")
 
     click.echo("\n✅ Done!")
 

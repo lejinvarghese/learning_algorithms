@@ -1,4 +1,19 @@
+# Python
 .venv/
 __pycache__/
 *.pyc
+
+# Model checkpoints
 checkpoints/
+
+# Data directories
+data_cache/
+lv12_multimodal_dataset/
+unified_dataset/
+
+# Test directories
+test_*/
+
+# Backup files
+*.backup
+*~

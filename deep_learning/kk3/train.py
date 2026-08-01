@@ -76,6 +76,8 @@ def _deepspeed_plugin(cpu_offload: bool):
 @click.option("--cpu-offload/--no-cpu-offload", default=True, show_default=True, help="use DeepSpeed ZeRO-2 (gradient sharding)")
 @click.option("--grad-clip", type=float, default=1.0, show_default=True, help="gradient clipping max norm")
 @click.option("--muon-lr", type=float, default=0.005, show_default=True, help="Muon optimizer learning rate")
+@click.option("--warmup-ratio", type=float, default=0.1, show_default=True, help="warmup as fraction of total steps")
+@click.option("--min-lr-ratio", type=float, default=0.1, show_default=True, help="minimum LR as fraction of peak LR")
 @click.option("--toy", is_flag=True, help="offline synthetic data instead of streaming from Hugging Face")
 def main(
     mult,
@@ -92,6 +94,8 @@ def main(
     cpu_offload,
     grad_clip,
     muon_lr,
+    warmup_ratio,
+    min_lr_ratio,
     toy,
 ):
     accelerator = Accelerator(
@@ -144,11 +148,27 @@ def main(
             self.adamw.load_state_dict(state_dict["adamw"])
 
     opt = HybridOptimizer(muon_opt, adamw_opt)
+
+    # Cosine annealing with warmup
+    total_steps = len(train_loader) * epochs
+    warmup_steps = int(total_steps * warmup_ratio)
+
+    def lr_lambda(step):
+        if step < warmup_steps:
+            return step / warmup_steps
+        progress = (step - warmup_steps) / (total_steps - warmup_steps)
+        cosine_decay = 0.5 * (1 + torch.cos(torch.tensor(progress * 3.14159)))
+        return min_lr_ratio + (1 - min_lr_ratio) * cosine_decay
+
+    muon_scheduler = torch.optim.lr_scheduler.LambdaLR(muon_opt, lr_lambda)
+    adamw_scheduler = torch.optim.lr_scheduler.LambdaLR(adamw_opt, lr_lambda)
+
     if accelerator.is_main_process:
         if cpu_offload:
             click.secho(f"Using Muon ({len(muon_params)} params) + AdamW ({len(adamw_params)} params) with DeepSpeed ZeRO-2", fg="green")
         else:
             click.secho(f"Using Muon ({len(muon_params)} params) + AdamW ({len(adamw_params)} params)", fg="green")
+        click.secho(f"LR schedule: warmup {warmup_steps}/{total_steps} steps ({warmup_ratio:.0%}), cosine decay to {min_lr_ratio:.0%} of peak", fg="cyan")
 
     model, opt, train_loader, test_loader = accelerator.prepare(model, opt, train_loader, test_loader)
 
@@ -212,6 +232,8 @@ def main(
                 if grad_clip > 0:
                     accelerator.clip_grad_norm_(model.parameters(), grad_clip)
                 opt.step()
+                muon_scheduler.step()
+                adamw_scheduler.step()
                 opt.zero_grad()
 
             if accelerator.is_main_process:
