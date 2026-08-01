@@ -48,30 +48,14 @@ def _deepspeed_plugin(cpu_offload: bool):
         return None
     from accelerate.utils import DeepSpeedPlugin
 
-    # DeepSpeed config with Muon optimizer (hybrid with AdamW for incompatible params)
+    # DeepSpeed ZeRO-2 for gradient sharding
+    # Note: Muon doesn't support optimizer offload, so just using ZeRO-2
     ds_config = {
         "zero_optimization": {
             "stage": 2,
-            "offload_optimizer": {"device": "cpu", "pin_memory": True},
         },
         "train_batch_size": "auto",
         "train_micro_batch_size_per_gpu": "auto",
-        "optimizer": {
-            "type": "Muon",
-            "params": {
-                "lr": 0.02,
-                "momentum": 0.95,
-                "weight_decay": 0.0,
-            },
-        },
-        # Parameters incompatible with Muon (1D, embeddings) use AdamW
-        "hybrid_optimizer": {
-            "type": "AdamW",
-            "params": {
-                "lr": 3e-4,
-                "weight_decay": 0.01,
-            },
-        },
     }
 
     return DeepSpeedPlugin(hf_ds_config=ds_config)
@@ -84,12 +68,14 @@ def _deepspeed_plugin(cpu_offload: bool):
 @click.option("--batch-size", type=int, default=4, show_default=True)
 @click.option("--seq-len", type=int, default=32, show_default=True)
 @click.option("--num-frames", type=int, default=4, show_default=True, help="frames per video clip / per image")
-@click.option("--n-train", type=int, default=10_000, show_default=True, help="samples per source, training split")
+@click.option("--n-train", type=int, default=100_000, show_default=True, help="samples per source, training split")
 @click.option("--n-eval", type=int, default=1_000, show_default=True, help="samples per source, eval split")
 @click.option("--grad-checkpoint/--no-grad-checkpoint", default=True, show_default=True)
 @click.option("--grad-accum", type=int, default=1, show_default=True, help="steps to accumulate before an update")
 @click.option("--mixed-precision", type=click.Choice(["no", "fp16", "bf16"]), default="no", show_default=True)
-@click.option("--cpu-offload/--no-cpu-offload", default=True, show_default=True, help="needs CUDA + deepspeed")
+@click.option("--cpu-offload/--no-cpu-offload", default=True, show_default=True, help="use DeepSpeed ZeRO-2 (gradient sharding)")
+@click.option("--grad-clip", type=float, default=1.0, show_default=True, help="gradient clipping max norm")
+@click.option("--muon-lr", type=float, default=0.005, show_default=True, help="Muon optimizer learning rate")
 @click.option("--toy", is_flag=True, help="offline synthetic data instead of streaming from Hugging Face")
 def main(
     mult,
@@ -104,6 +90,8 @@ def main(
     grad_accum,
     mixed_precision,
     cpu_offload,
+    grad_clip,
+    muon_lr,
     toy,
 ):
     accelerator = Accelerator(
@@ -124,46 +112,42 @@ def main(
     test_loader = DataLoader(test_data, batch_size=batch_size)
 
     # Hybrid optimizer: Muon for 2D+ params (conv/linear), AdamW for 1D (embed/norm)
-    if cpu_offload:
-        # DeepSpeed handles optimizer (configured in plugin)
-        opt = None
-        if accelerator.is_main_process:
-            click.secho("Using DeepSpeed ZeRO-2 with Muon optimizer + CPU offload", fg="green")
-    else:
-        # Manual hybrid optimizer for single GPU
-        muon_params = []
-        adamw_params = []
-        for name, param in model.named_parameters():
-            if param.ndim >= 2 and "embed" not in name.lower():
-                muon_params.append(param)
-            else:
-                adamw_params.append(param)
+    muon_params = []
+    adamw_params = []
+    for name, param in model.named_parameters():
+        if param.ndim >= 2 and "embed" not in name.lower():
+            muon_params.append(param)
+        else:
+            adamw_params.append(param)
 
-        muon_opt = Muon(muon_params, lr=0.02, momentum=0.95)
-        adamw_opt = AdamW(adamw_params, lr=3e-4)
+    muon_opt = Muon(muon_params, lr=muon_lr, momentum=0.95)
+    adamw_opt = AdamW(adamw_params, lr=muon_lr / 10)  # AdamW uses 10x lower LR
 
-        class HybridOptimizer:
-            def __init__(self, muon, adamw):
-                self.muon = muon
-                self.adamw = adamw
+    class HybridOptimizer:
+        def __init__(self, muon, adamw):
+            self.muon = muon
+            self.adamw = adamw
 
-            def step(self):
-                self.muon.step()
-                self.adamw.step()
+        def step(self):
+            self.muon.step()
+            self.adamw.step()
 
-            def zero_grad(self):
-                self.muon.zero_grad()
-                self.adamw.zero_grad()
+        def zero_grad(self):
+            self.muon.zero_grad()
+            self.adamw.zero_grad()
 
-            def state_dict(self):
-                return {"muon": self.muon.state_dict(), "adamw": self.adamw.state_dict()}
+        def state_dict(self):
+            return {"muon": self.muon.state_dict(), "adamw": self.adamw.state_dict()}
 
-            def load_state_dict(self, state_dict):
-                self.muon.load_state_dict(state_dict["muon"])
-                self.adamw.load_state_dict(state_dict["adamw"])
+        def load_state_dict(self, state_dict):
+            self.muon.load_state_dict(state_dict["muon"])
+            self.adamw.load_state_dict(state_dict["adamw"])
 
-        opt = HybridOptimizer(muon_opt, adamw_opt)
-        if accelerator.is_main_process:
+    opt = HybridOptimizer(muon_opt, adamw_opt)
+    if accelerator.is_main_process:
+        if cpu_offload:
+            click.secho(f"Using Muon ({len(muon_params)} params) + AdamW ({len(adamw_params)} params) with DeepSpeed ZeRO-2", fg="green")
+        else:
             click.secho(f"Using Muon ({len(muon_params)} params) + AdamW ({len(adamw_params)} params)", fg="green")
 
     model, opt, train_loader, test_loader = accelerator.prepare(model, opt, train_loader, test_loader)
@@ -225,6 +209,8 @@ def main(
                     )
 
                 accelerator.backward(loss)
+                if grad_clip > 0:
+                    accelerator.clip_grad_norm_(model.parameters(), grad_clip)
                 opt.step()
                 opt.zero_grad()
 
