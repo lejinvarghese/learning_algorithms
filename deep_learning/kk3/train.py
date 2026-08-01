@@ -31,52 +31,33 @@ def get_datasets(n_train, n_eval, seq_len, frame_size, num_frames):
 @click.option("--batch-size", type=int, default=16, show_default=True, help="training batch size")
 @click.option("--n-train", type=int, default=100_000, show_default=True, help="samples per source, training split")
 def main(epochs, batch_size, n_train):
-    # Hardcoded configuration
-    mult = 1.0
-    vision = True
-    seq_len = 32
-    num_frames = 4
-    n_eval = 1_000
-    grad_checkpoint = True
-    grad_accum = 1
-    mixed_precision = "no"
-    grad_clip = 1.0
-    muon_lr = 0.005
-    warmup_ratio = 0.01
-    min_lr_ratio = 0.1
-
     from accelerate.utils import DeepSpeedPlugin
 
     accelerator = Accelerator(
-        gradient_accumulation_steps=grad_accum,
-        mixed_precision=mixed_precision,
+        gradient_accumulation_steps=1,
+        mixed_precision="no",
         deepspeed_plugin=DeepSpeedPlugin(zero_stage=2, offload_optimizer_device="cpu") if torch.cuda.is_available() else None,
     )
 
-    cfg = K3Config.scaled(
-        mult, use_vision=vision, use_gradient_checkpointing=grad_checkpoint, vit_num_frames=num_frames
-    )
+    cfg = K3Config.scaled(1.0, use_vision=True, use_gradient_checkpointing=True, vit_num_frames=4)
     model = K3Model(cfg)
     counts = model.param_counts()
 
     frame_size = cfg.vit_patch_size * 8
-    train_data, test_data = get_datasets(n_train, n_eval, seq_len, frame_size, num_frames)
+    train_data, test_data = get_datasets(n_train, 1_000, 32, frame_size, 4)
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, drop_last=True)
     test_loader = DataLoader(test_data, batch_size=batch_size)
 
-    opt = create_k3_optimizer(model, cfg, muon_lr=muon_lr)
+    opt = create_k3_optimizer(model, cfg, muon_lr=0.005)
 
-    # Cosine annealing with warmup using PyTorch's built-in schedulers
     total_steps = len(train_loader) * epochs
-    warmup_steps = int(total_steps * warmup_ratio)
+    warmup_steps = int(total_steps * 0.01)
 
-    # Warmup phase: linear ramp from 0 to peak LR
     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
         opt, start_factor=1e-10, end_factor=1.0, total_iters=warmup_steps
     )
-    # Cosine decay phase: from peak LR to min_lr_ratio * peak LR
     cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        opt, T_max=total_steps - warmup_steps, eta_min=muon_lr * min_lr_ratio
+        opt, T_max=total_steps - warmup_steps, eta_min=0.005 * 0.1
     )
     # Chain them together
     scheduler = torch.optim.lr_scheduler.SequentialLR(
@@ -103,8 +84,7 @@ def main(epochs, batch_size, n_train):
                     )
 
                 accelerator.backward(loss)
-                if grad_clip > 0:
-                    accelerator.clip_grad_norm_(model.parameters(), grad_clip)
+                accelerator.clip_grad_norm_(model.parameters(), 1.0)
                 opt.step()
                 scheduler.step()
                 opt.zero_grad()
