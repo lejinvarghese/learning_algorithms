@@ -26,17 +26,6 @@ def get_datasets(n_train, n_eval, seq_len, frame_size, num_frames):
     return ConcatDataset(train_sets), ConcatDataset(test_sets)
 
 
-def get_deepspeed_plugin(cpu_offload: bool):
-    if not cpu_offload:
-        return None
-    if not torch.cuda.is_available():
-        click.secho("--cpu-offload requires CUDA; no CUDA device found, ignoring.", fg="yellow")
-        return None
-    from accelerate.utils import DeepSpeedPlugin
-
-    return DeepSpeedPlugin(zero_stage=2, offload_optimizer_device="cpu")
-
-
 @click.command()
 @click.option("--epochs", type=int, default=3, show_default=True, help="number of training epochs")
 @click.option("--batch-size", type=int, default=16, show_default=True, help="training batch size")
@@ -51,16 +40,17 @@ def main(epochs, batch_size, n_train):
     grad_checkpoint = True
     grad_accum = 1
     mixed_precision = "no"
-    cpu_offload = True
     grad_clip = 1.0
     muon_lr = 0.005
     warmup_ratio = 0.01
     min_lr_ratio = 0.1
 
+    from accelerate.utils import DeepSpeedPlugin
+
     accelerator = Accelerator(
         gradient_accumulation_steps=grad_accum,
         mixed_precision=mixed_precision,
-        deepspeed_plugin=get_deepspeed_plugin(cpu_offload),
+        deepspeed_plugin=DeepSpeedPlugin(zero_stage=2, offload_optimizer_device="cpu") if torch.cuda.is_available() else None,
     )
 
     cfg = K3Config.scaled(
