@@ -3,13 +3,17 @@ requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'linux'",
     "python_full_version == '3.14.*' and sys_platform == 'linux'",
-    "python_full_version < '3.14' and sys_platform == 'linux'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
+    "python_full_version < '3.13' and sys_platform == 'linux'",
     "python_full_version >= '3.14' and sys_platform == 'win32'",
     "python_full_version >= '3.14' and sys_platform == 'emscripten'",
     "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version < '3.14' and sys_platform == 'win32'",
-    "python_full_version < '3.14' and sys_platform == 'emscripten'",
-    "python_full_version < '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'win32'",
+    "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
+    "python_full_version < '3.13' and sys_platform == 'emscripten'",
+    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
+    "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 
 [[package]]
@@ -609,7 +613,10 @@ dependencies = [
     { name = "numpy" },
     { name = "pillow" },
     { name = "psutil" },
+    { name = "requests" },
     { name = "torch" },
+    { name = "torchaudio" },
+    { name = "tqdm" },
     { name = "transformers" },
 ]
 
@@ -625,7 +632,10 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.25.0" },
     { name = "pillow", specifier = ">=10.0.0" },
     { name = "psutil", specifier = ">=5.9.0" },
+    { name = "requests", specifier = ">=2.31.0" },
     { name = "torch", specifier = ">=2.3.0", index = "https://download.pytorch.org/whl/cu124" },
+    { name = "torchaudio", specifier = ">=2.3.0", index = "https://download.pytorch.org/whl/cu124" },
+    { name = "tqdm", specifier = ">=4.65.0" },
     { name = "transformers", specifier = ">=4.40.0" },
 ]
 
@@ -1840,6 +1850,20 @@ wheels = [
     { url = "https://download-r2.pytorch.org/whl/cu124/torch-2.6.0%2Bcu124-cp313-cp313-linux_x86_64.whl", hash = "sha256:0f3bc53c988ce9568cd876a2a5316761e84a8704135ec8068f5f81b4417979cb" },
     { url = "https://download-r2.pytorch.org/whl/cu124/torch-2.6.0%2Bcu124-cp313-cp313-win_amd64.whl", hash = "sha256:519330eef09534acad8110b6f423d2fe58c1d8e9ada999ed077a637a0021f908" },
     { url = "https://download-r2.pytorch.org/whl/cu124/torch-2.6.0%2Bcu124-cp313-cp313t-linux_x86_64.whl", hash = "sha256:35cba404c0d742406cdcba1609085874bc60facdfbc50e910c47a92405fef44c" },
+]
+
+[[package]]
+name = "torchaudio"
+version = "2.6.0+cu124"
+source = { registry = "https://download.pytorch.org/whl/cu124" }
+dependencies = [
+    { name = "torch" },
+]
+wheels = [
+    { url = "https://download-r2.pytorch.org/whl/cu124/torchaudio-2.6.0%2Bcu124-cp312-cp312-linux_x86_64.whl", hash = "sha256:3e5ffa69606171c74f3e2b969785ead50b782ca657e746aaee1ee7cc88dcfc08" },
+    { url = "https://download-r2.pytorch.org/whl/cu124/torchaudio-2.6.0%2Bcu124-cp312-cp312-win_amd64.whl", hash = "sha256:004ff6bcee0ac78747253c09db67d281add4308a9b87a7bf1769da5914998639" },
+    { url = "https://download-r2.pytorch.org/whl/cu124/torchaudio-2.6.0%2Bcu124-cp313-cp313-linux_x86_64.whl", hash = "sha256:1bc23963f447c910a0060b130b04b407d2ea218b2a553e674c829d5f17eb8c8e" },
+    { url = "https://download-r2.pytorch.org/whl/cu124/torchaudio-2.6.0%2Bcu124-cp313-cp313-win_amd64.whl", hash = "sha256:231eddbfd8bafd06b2c9f55cd6f33e61f58b25b19f2d51382a95e8f12887689f" },
 ]
 
 [[package]]
