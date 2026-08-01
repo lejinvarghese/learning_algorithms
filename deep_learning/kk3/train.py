@@ -41,26 +41,8 @@ def _datasets(toy, n_train, n_eval, seq_len, frame_size, num_frames):
 
 
 def _deepspeed_plugin(cpu_offload: bool):
-    # DeepSpeed doesn't work with custom optimizer wrappers (HybridOptimizer)
-    # Disabled until we refactor to use a DeepSpeed-compatible optimizer setup
+    # DeepSpeed ZeRO-2 doesn't work with custom optimizer wrappers (HybridOptimizer)
     return None
-
-    # if not cpu_offload:
-    #     return None
-    # if not torch.cuda.is_available():
-    #     click.secho("--cpu-offload requires CUDA; no CUDA device found, ignoring.", fg="yellow")
-    #     return None
-    # from accelerate.utils import DeepSpeedPlugin
-    #
-    # ds_config = {
-    #     "zero_optimization": {
-    #         "stage": 2,
-    #     },
-    #     "train_batch_size": "auto",
-    #     "train_micro_batch_size_per_gpu": "auto",
-    # }
-    #
-    # return DeepSpeedPlugin(hf_ds_config=ds_config)
 
 
 @click.command()
@@ -166,10 +148,11 @@ def main(
     adamw_scheduler = torch.optim.lr_scheduler.LambdaLR(adamw_opt, lr_lambda)
 
     if accelerator.is_main_process:
-        click.secho(f"Using Muon ({len(muon_params)} params) + AdamW ({len(adamw_params)} params)", fg="green")
-        click.secho(f"LR schedule: warmup {warmup_steps}/{total_steps} steps ({warmup_ratio:.0%}), cosine decay to {min_lr_ratio:.0%} of peak", fg="cyan")
         if cpu_offload:
-            click.secho("Note: --cpu-offload disabled (incompatible with hybrid optimizer)", fg="yellow")
+            click.secho(f"Using Muon ({len(muon_params)} params) + AdamW ({len(adamw_params)} params) with DeepSpeed ZeRO-2", fg="green")
+        else:
+            click.secho(f"Using Muon ({len(muon_params)} params) + AdamW ({len(adamw_params)} params)", fg="green")
+        click.secho(f"LR schedule: warmup {warmup_steps}/{total_steps} steps ({warmup_ratio:.0%}), cosine decay to {min_lr_ratio:.0%} of peak", fg="cyan")
 
     model, opt, train_loader, test_loader = accelerator.prepare(model, opt, train_loader, test_loader)
 
