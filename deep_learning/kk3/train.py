@@ -41,8 +41,14 @@ def _datasets(toy, n_train, n_eval, seq_len, frame_size, num_frames):
 
 
 def _deepspeed_plugin(cpu_offload: bool):
-    # DeepSpeed ZeRO-2 doesn't work with custom optimizer wrappers (HybridOptimizer)
-    return None
+    if not cpu_offload:
+        return None
+    if not torch.cuda.is_available():
+        click.secho("--cpu-offload requires CUDA; no CUDA device found, ignoring.", fg="yellow")
+        return None
+    from accelerate.utils import DeepSpeedPlugin
+
+    return DeepSpeedPlugin(zero_stage=2, offload_optimizer_device="cpu")
 
 
 @click.command()
