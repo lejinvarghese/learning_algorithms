@@ -12,7 +12,7 @@ from k3.hf_data import HFImageCaptionDataset, HFTextDataset
 from optimizer import create_k3_optimizer
 
 
-def _datasets(n_train, n_eval, seq_len, frame_size, num_frames):
+def get_datasets(n_train, n_eval, seq_len, frame_size, num_frames):
 
     train_sets = [
         HFTextDataset("train", n_train, seq_len, frame_size, num_frames),
@@ -26,7 +26,7 @@ def _datasets(n_train, n_eval, seq_len, frame_size, num_frames):
     return ConcatDataset(train_sets), ConcatDataset(test_sets)
 
 
-def _deepspeed_plugin(cpu_offload: bool):
+def get_deepspeed_plugin(cpu_offload: bool):
     if not cpu_offload:
         return None
     if not torch.cuda.is_available():
@@ -39,18 +39,18 @@ def _deepspeed_plugin(cpu_offload: bool):
 
 @click.command()
 @click.option("--epochs", type=int, default=3, show_default=True, help="number of training epochs")
-@click.option("--batch-size", type=int, default=4, show_default=True, help="training batch size")
+@click.option("--batch-size", type=int, default=16, show_default=True, help="training batch size")
 @click.option("--n-train", type=int, default=100_000, show_default=True, help="samples per source, training split")
 def main(epochs, batch_size, n_train):
     # Hardcoded configuration
     mult = 1.0
-    vision = False
+    vision = True
     seq_len = 32
     num_frames = 4
     n_eval = 1_000
     grad_checkpoint = True
     grad_accum = 1
-    mixed_precision = "bf16"
+    mixed_precision = "no"
     cpu_offload = True
     grad_clip = 1.0
     muon_lr = 0.005
@@ -60,7 +60,7 @@ def main(epochs, batch_size, n_train):
     accelerator = Accelerator(
         gradient_accumulation_steps=grad_accum,
         mixed_precision=mixed_precision,
-        deepspeed_plugin=_deepspeed_plugin(cpu_offload),
+        deepspeed_plugin=get_deepspeed_plugin(cpu_offload),
     )
 
     cfg = K3Config.scaled(
@@ -70,7 +70,7 @@ def main(epochs, batch_size, n_train):
     counts = model.param_counts()
 
     frame_size = cfg.vit_patch_size * 8
-    train_data, test_data = _datasets(n_train, n_eval, seq_len, frame_size, num_frames)
+    train_data, test_data = get_datasets(n_train, n_eval, seq_len, frame_size, num_frames)
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, drop_last=True)
     test_loader = DataLoader(test_data, batch_size=batch_size)
 
@@ -93,58 +93,11 @@ def main(epochs, batch_size, n_train):
         opt, schedulers=[warmup_scheduler, cosine_scheduler], milestones=[warmup_steps]
     )
 
-    if accelerator.is_main_process:
-        opt_name = "K3 Optimizer (per-head Muon + Muon + Adam)"
-        if cpu_offload:
-            click.secho(f"{opt_name} with DeepSpeed ZeRO-2", fg="green")
-        else:
-            click.secho(opt_name, fg="green")
-        click.secho(f"LR: {muon_lr}, warmup {warmup_steps}/{total_steps} steps ({warmup_ratio:.0%}), cosine decay to {min_lr_ratio:.0%}", fg="cyan")
-
     model, opt, train_loader, test_loader = accelerator.prepare(model, opt, train_loader, test_loader)
 
-    # Verify CPU offload and optimizer configuration
     if accelerator.is_main_process:
-        if cpu_offload and hasattr(accelerator.state, "deepspeed_plugin"):
-            # Check if DeepSpeed is actually offloading
-            if hasattr(model, "optimizer") and hasattr(model.optimizer, "optimizer_swapper"):
-                click.secho("✓ DeepSpeed ZeRO-2 CPU offload active", fg="green")
-            elif hasattr(model, "config") and hasattr(model.config, "zero_optimization"):
-                zero_cfg = model.config.zero_optimization
-                if zero_cfg.get("offload_optimizer", {}).get("device") == "cpu":
-                    click.secho("✓ DeepSpeed configured for CPU offload", fg="green")
-                    # Check optimizer state location
-                    import psutil
-
-                    process = psutil.Process()
-                    cpu_mem_gb = process.memory_info().rss / 1e9
-                    click.secho(f"  CPU RAM usage: {cpu_mem_gb:.2f} GB", fg="cyan")
-            else:
-                click.secho("⚠ DeepSpeed enabled but offload status unclear", fg="yellow")
-
-        # Show GPU memory before training starts
-        if torch.cuda.is_available():
-            gpu_mem_allocated = torch.cuda.memory_allocated() / 1e9
-            gpu_mem_reserved = torch.cuda.memory_reserved() / 1e9
-            click.secho(
-                f"GPU memory: {gpu_mem_allocated:.2f} GB allocated, {gpu_mem_reserved:.2f} GB reserved", fg="cyan"
-            )
-
-    if accelerator.is_main_process:
-        click.secho(f"device={accelerator.device} mixed_precision={mixed_precision}", fg="cyan")
-        click.secho(
-            f"config: hidden={cfg.hidden_dim} layers={cfg.num_layers} "
-            f"routed_experts={cfg.num_routed_experts} active={cfg.num_experts_active} "
-            f"vocab={cfg.vocab_size} vision={cfg.use_vision}",
-            fg="cyan",
-        )
-        click.secho(f"train samples: {len(train_data)}  eval samples: {len(test_data)}", fg="cyan")
-        click.secho(f"total params:     {counts['total'] / 1e6:8.2f} M", fg="yellow")
-        click.secho(
-            f"activated approx: {counts['activated_approx'] / 1e6:8.2f} M  "
-            f"(sparse MoE => far fewer FLOPs/token than total params)",
-            fg="yellow",
-        )
+        click.secho(f"K3 {counts['total'] / 1e6:.1f}M params ({counts['activated_approx'] / 1e6:.1f}M active) | "
+                    f"{len(train_data)} train, {len(test_data)} eval | {accelerator.device}", fg="cyan")
 
     first_loss, global_step = None, 0
     for epoch in range(1, epochs + 1):
@@ -170,26 +123,8 @@ def main(epochs, batch_size, n_train):
                 loss_val = loss.item()
                 first_loss = first_loss if first_loss is not None else loss_val
                 global_step += 1
-
-                # Show memory usage after first step to verify offload
-                if global_step == 1 and cpu_offload:
-                    import psutil
-
-                    process = psutil.Process()
-                    cpu_mem_gb = process.memory_info().rss / 1e9
-                    if torch.cuda.is_available():
-                        gpu_mem_gb = torch.cuda.memory_allocated() / 1e9
-                        click.secho(
-                            f"After first step - GPU: {gpu_mem_gb:.2f} GB, CPU RAM: {cpu_mem_gb:.2f} GB "
-                            f"(optimizer state should be on CPU)",
-                            fg="magenta",
-                        )
-
-                click.secho(
-                    f"epoch {epoch}/{epochs} step {step}/{len(train_loader)} (global {global_step}): "
-                    f"loss={loss_val:.4f}",
-                    fg="green" if loss_val <= first_loss else "red",
-                )
+                click.secho(f"epoch {epoch}/{epochs} step {step}/{len(train_loader)}: loss={loss_val:.4f}",
+                           fg="green" if loss_val <= first_loss else "red")
 
         metrics = evaluate(model, test_loader, cfg.vocab_size, accelerator.device)
         if accelerator.is_main_process:
