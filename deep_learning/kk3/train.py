@@ -9,7 +9,7 @@ from k3 import K3Config, K3Model
 from k3.eval import evaluate
 from k3.hf_data import HFImageCaptionDataset, HFTextDataset
 
-from optimizer import K3Optimizer
+from optimizer import create_k3_optimizer
 
 
 def _datasets(n_train, n_eval, seq_len, frame_size, num_frames):
@@ -44,17 +44,17 @@ def _deepspeed_plugin(cpu_offload: bool):
 def main(epochs, batch_size, n_train):
     # Hardcoded configuration
     mult = 1.0
-    no_vision = False
+    vision = False
     seq_len = 32
     num_frames = 4
     n_eval = 1_000
     grad_checkpoint = True
     grad_accum = 1
-    mixed_precision = "no"
+    mixed_precision = "bf16"
     cpu_offload = True
     grad_clip = 1.0
     muon_lr = 0.005
-    warmup_ratio = 0.1
+    warmup_ratio = 0.01
     min_lr_ratio = 0.1
 
     accelerator = Accelerator(
@@ -64,7 +64,7 @@ def main(epochs, batch_size, n_train):
     )
 
     cfg = K3Config.scaled(
-        mult, use_vision=not no_vision, use_gradient_checkpointing=grad_checkpoint, vit_num_frames=num_frames
+        mult, use_vision=vision, use_gradient_checkpointing=grad_checkpoint, vit_num_frames=num_frames
     )
     model = K3Model(cfg)
     counts = model.param_counts()
@@ -74,56 +74,7 @@ def main(epochs, batch_size, n_train):
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, drop_last=True)
     test_loader = DataLoader(test_data, batch_size=batch_size)
 
-    # K3 optimizer: per-head Muon for Q/K/V, standard Muon for other 2D+, Adam for 1D
-    per_head_muon_params = []
-    muon_params = []
-    adam_params = []
-
-    for name, param in model.named_parameters():
-        # Q, K, V projections in KimiDeltaAttention and GatedMLA get per-head Muon
-        if param.ndim >= 2 and any(x in name for x in ['q_lin', 'k_lin', 'v_lin', 'q_up', 'k_up', 'v_up']):
-            per_head_muon_params.append((name, param))
-        # Other 2D+ parameters (excluding embeddings) get standard Muon
-        elif param.ndim >= 2 and "embed" not in name.lower():
-            muon_params.append(param)
-        # 1D parameters (norms, biases) and embeddings get Adam
-        else:
-            adam_params.append(param)
-
-    # Create parameter groups for K3Optimizer
-    param_groups = []
-
-    # Per-head Muon for Q, K, V projections
-    if per_head_muon_params:
-        for name, param in per_head_muon_params:
-            param_groups.append({
-                'params': [param],
-                'optimizer_type': 'per_head_muon',
-                'num_heads': cfg.num_heads,
-                'lr': muon_lr,
-                'momentum': 0.95,
-            })
-
-    # Standard Muon for other matrix parameters
-    if muon_params:
-        param_groups.append({
-            'params': muon_params,
-            'optimizer_type': 'muon',
-            'lr': muon_lr,
-            'momentum': 0.95,
-        })
-
-    # Adam for 1D parameters and embeddings
-    if adam_params:
-        param_groups.append({
-            'params': adam_params,
-            'optimizer_type': 'adam',
-            'lr': muon_lr / 10,  # Adam uses 10x lower LR
-            'betas': (0.9, 0.95),
-            'eps': 1e-10,
-        })
-
-    opt = K3Optimizer(param_groups)
+    opt = create_k3_optimizer(model, cfg, muon_lr=muon_lr)
 
     # Cosine annealing with warmup using PyTorch's built-in schedulers
     total_steps = len(train_loader) * epochs
@@ -143,14 +94,12 @@ def main(epochs, batch_size, n_train):
     )
 
     if accelerator.is_main_process:
-        n_per_head = len(per_head_muon_params)
-        n_muon = len(muon_params)
-        n_adam = len(adam_params)
+        opt_name = "K3 Optimizer (per-head Muon + Muon + Adam)"
         if cpu_offload:
-            click.secho(f"Using K3 Optimizer: {n_per_head} per-head Muon, {n_muon} Muon, {n_adam} Adam params with DeepSpeed ZeRO-2", fg="green")
+            click.secho(f"{opt_name} with DeepSpeed ZeRO-2", fg="green")
         else:
-            click.secho(f"Using K3 Optimizer: {n_per_head} per-head Muon, {n_muon} Muon, {n_adam} Adam params", fg="green")
-        click.secho(f"LR schedule: warmup {warmup_steps}/{total_steps} steps ({warmup_ratio:.0%}), cosine decay to {min_lr_ratio:.0%} of peak", fg="cyan")
+            click.secho(opt_name, fg="green")
+        click.secho(f"LR: {muon_lr}, warmup {warmup_steps}/{total_steps} steps ({warmup_ratio:.0%}), cosine decay to {min_lr_ratio:.0%}", fg="cyan")
 
     model, opt, train_loader, test_loader = accelerator.prepare(model, opt, train_loader, test_loader)
 

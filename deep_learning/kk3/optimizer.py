@@ -189,3 +189,65 @@ class K3Optimizer(torch.optim.Optimizer):
                     p.add_(update, alpha=-group['lr'])
 
         return loss
+
+
+def create_k3_optimizer(model, cfg, muon_lr=0.005):
+    """
+    Create K3Optimizer for a model with proper parameter grouping.
+
+    Args:
+        model: K3Model instance
+        cfg: K3Config instance
+        muon_lr: Learning rate for Muon (Adam uses 10x lower)
+
+    Returns:
+        K3Optimizer instance
+    """
+    per_head_muon_params = []
+    muon_params = []
+    adam_params = []
+
+    for name, param in model.named_parameters():
+        # Q, K, V projections in KimiDeltaAttention and GatedMLA get per-head Muon
+        if param.ndim >= 2 and any(x in name for x in ['q_lin', 'k_lin', 'v_lin', 'q_up', 'k_up', 'v_up']):
+            per_head_muon_params.append((name, param))
+        # Other 2D+ parameters (excluding embeddings) get standard Muon
+        elif param.ndim >= 2 and "embed" not in name.lower():
+            muon_params.append(param)
+        # 1D parameters (norms, biases) and embeddings get Adam
+        else:
+            adam_params.append(param)
+
+    param_groups = []
+
+    # Per-head Muon for Q, K, V projections
+    if per_head_muon_params:
+        for name, param in per_head_muon_params:
+            param_groups.append({
+                'params': [param],
+                'optimizer_type': 'per_head_muon',
+                'num_heads': cfg.num_heads,
+                'lr': muon_lr,
+                'momentum': 0.95,
+            })
+
+    # Standard Muon for other matrix parameters
+    if muon_params:
+        param_groups.append({
+            'params': muon_params,
+            'optimizer_type': 'muon',
+            'lr': muon_lr,
+            'momentum': 0.95,
+        })
+
+    # Adam for 1D parameters and embeddings
+    if adam_params:
+        param_groups.append({
+            'params': adam_params,
+            'optimizer_type': 'adam',
+            'lr': muon_lr / 10,
+            'betas': (0.9, 0.95),
+            'eps': 1e-10,
+        })
+
+    return K3Optimizer(param_groups)
