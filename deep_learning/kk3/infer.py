@@ -28,8 +28,10 @@ def load_checkpoint(ckpt_path: str, device: str):
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
     click.secho(f"Loaded checkpoint from epoch {ckpt['epoch']}", fg="green")
-    click.secho(f"Eval metrics: loss={ckpt['eval_metrics']['loss']:.4f}, "
-                f"accuracy={ckpt['eval_metrics']['accuracy']:.2%}", fg="cyan")
+    click.secho(
+        f"Eval metrics: loss={ckpt['eval_metrics']['loss']:.4f}, " f"accuracy={ckpt['eval_metrics']['accuracy']:.2%}",
+        fg="cyan",
+    )
     return model, cfg
 
 
@@ -37,7 +39,7 @@ def encode_text(text: str, seq_len: int = 128) -> torch.Tensor:
     """Encode text as UTF-8 bytes."""
     raw = text.encode("utf-8")[:seq_len]
     ids = torch.zeros(seq_len, dtype=torch.long)
-    ids[:len(raw)] = torch.tensor(list(raw), dtype=torch.long)
+    ids[: len(raw)] = torch.tensor(list(raw), dtype=torch.long)
     return ids
 
 
@@ -47,7 +49,7 @@ def decode_text(ids: torch.Tensor) -> str:
     ids = ids.cpu().numpy()
     end = np.where(ids == 0)[0]
     if len(end) > 0:
-        ids = ids[:end[0]]
+        ids = ids[: end[0]]
     try:
         return bytes(ids).decode("utf-8", errors="ignore")
     except:
@@ -72,7 +74,7 @@ def generate(
     images: torch.Tensor = None,
     max_new_tokens: int = 64,
     temperature: float = 0.1,
-    device: str = "cuda"
+    device: str = "cuda",
 ):
     """Generate text continuation."""
     prompt_ids = prompt_ids.to(device).unsqueeze(0)  # (1, seq_len)
@@ -149,10 +151,7 @@ def main(checkpoint, text, image, max_tokens, temperature, device):
     # Generate
     click.secho("Generating...", fg="yellow")
     output_ids = generate(
-        model, cfg, prompt_ids, images,
-        max_new_tokens=max_tokens,
-        temperature=temperature,
-        device=device
+        model, cfg, prompt_ids, images, max_new_tokens=max_tokens, temperature=temperature, device=device
     )
 
     # Decode and display

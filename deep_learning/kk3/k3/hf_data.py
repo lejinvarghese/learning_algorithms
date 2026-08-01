@@ -14,8 +14,12 @@ def _encode(caption: str, seq_len: int) -> torch.Tensor:
 
 class HFTextDataset(Dataset):
     def __init__(
-        self, split: str = "train", n_samples: int = 32, seq_len: int = 32,
-        frame_size: int = 112, num_frames: int = 8,
+        self,
+        split: str = "train",
+        n_samples: int = 32,
+        seq_len: int = 32,
+        frame_size: int = 112,
+        num_frames: int = 8,
     ):
         split_name = {"train": "train", "val": "valid", "test": "test"}[split]
         ds = load_dataset("lv12/MultiModalDataset", "fineweb", split=split_name)
@@ -34,8 +38,12 @@ class HFTextDataset(Dataset):
 
 class HFImageCaptionDataset(Dataset):
     def __init__(
-        self, split: str = "train", n_samples: int = 32, seq_len: int = 32,
-        frame_size: int = 112, num_frames: int = 8,
+        self,
+        split: str = "train",
+        n_samples: int = 32,
+        seq_len: int = 32,
+        frame_size: int = 112,
+        num_frames: int = 8,
     ):
         split_name = {"train": "train", "val": "valid", "test": "test"}[split]
         ds = load_dataset("lv12/MultiModalDataset", "coco", split=split_name)

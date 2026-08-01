@@ -27,11 +27,15 @@ class K3Block(nn.Module):
         self.layers = nn.ModuleList()
         for lt in layer_types:
             attn = KimiDeltaAttention(cfg) if lt == "kda" else GatedMLA(cfg)
-            self.layers.append(nn.ModuleDict({
-                "gate": AttnResGate(cfg.hidden_dim),
-                "attn": attn,
-                "moe": StableLatentMoE(cfg),
-            }))
+            self.layers.append(
+                nn.ModuleDict(
+                    {
+                        "gate": AttnResGate(cfg.hidden_dim),
+                        "attn": attn,
+                        "moe": StableLatentMoE(cfg),
+                    }
+                )
+            )
 
     def forward(self, block_reps: List[torch.Tensor]) -> torch.Tensor:
         partial = torch.zeros_like(block_reps[0])
@@ -91,9 +95,7 @@ class MoonViT(nn.Module):
         self.spatial_pos = nn.Parameter(torch.randn(1, 4096, cfg.vit_hidden) * 0.02)
         self.temporal_pos = nn.Parameter(torch.randn(1, cfg.vit_num_frames, cfg.vit_hidden) * 0.02)
 
-        self.layers = nn.ModuleList(
-            [nn.ModuleList([_vit_block(cfg), _vit_block(cfg)]) for _ in range(cfg.vit_layers)]
-        )
+        self.layers = nn.ModuleList([nn.ModuleList([_vit_block(cfg), _vit_block(cfg)]) for _ in range(cfg.vit_layers)])
         self.final_norm = RMSNorm(cfg.vit_hidden)
         self.projector = nn.Sequential(
             nn.Linear(cfg.vit_hidden * 4, cfg.vit_hidden * 4, bias=False),
@@ -133,9 +135,7 @@ class K3Model(nn.Module):
         self.embed = nn.Embedding(cfg.vocab_size, cfg.hidden_dim)
         self.embed_norm = RMSNorm(cfg.hidden_dim)
 
-        self.blocks = nn.ModuleList(
-            [K3Block(cfg, pattern) for pattern in build_layer_pattern(cfg)]
-        )
+        self.blocks = nn.ModuleList([K3Block(cfg, pattern) for pattern in build_layer_pattern(cfg)])
         self.final_norm = RMSNorm(cfg.hidden_dim)
         self.lm_head = nn.Linear(cfg.hidden_dim, cfg.vocab_size, bias=False)
         if cfg.tie_embeddings:
@@ -173,10 +173,7 @@ class K3Model(nn.Module):
         # fraction of each layer's routed experts fire.
         total = sum(p.numel() for p in self.parameters())
         moe_params = sum(
-            p.numel()
-            for block in self.blocks
-            for sub in block.layers
-            for p in sub["moe"].routed_experts.parameters()
+            p.numel() for block in self.blocks for sub in block.layers for p in sub["moe"].routed_experts.parameters()
         )
         active_frac = self.cfg.num_experts_active / max(1, self.cfg.num_routed_experts)
         activated = total - moe_params + int(moe_params * active_frac)

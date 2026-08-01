@@ -4,6 +4,7 @@ Per-head Muon optimizer for attention projections, as described in Kimi K3 paper
 For Q, K, V attention projections, we partition the momentum matrices along the head dimension
 and orthogonalize each head's block separately, rather than treating all heads as a single coupled block.
 """
+
 import torch
 import torch.nn as nn
 
@@ -34,7 +35,7 @@ def muon_update(grad, momentum, beta=0.95, ns_steps=5, nesterov=True):
     if update.ndim == 4:  # for conv filters
         update = update.view(len(update), -1)
     update = zeropower_via_newtonschulz5(update, steps=ns_steps)
-    update *= max(1, update.size(-2) / update.size(-1))**0.5
+    update *= max(1, update.size(-2) / update.size(-1)) ** 0.5
     return update
 
 
@@ -62,7 +63,9 @@ def per_head_muon_update(grad, momentum, num_heads, beta=0.95, ns_steps=5, neste
     # Partition along head dimension: (num_heads * head_dim, in_dim) -> (num_heads, head_dim, in_dim)
     out_features, in_features = update.shape
     head_dim = out_features // num_heads
-    assert out_features == num_heads * head_dim, f"out_features {out_features} must be divisible by num_heads {num_heads}"
+    assert (
+        out_features == num_heads * head_dim
+    ), f"out_features {out_features} must be divisible by num_heads {num_heads}"
 
     # Reshape to expose head dimension
     update_per_head = update.view(num_heads, head_dim, in_features)
@@ -72,7 +75,7 @@ def per_head_muon_update(grad, momentum, num_heads, beta=0.95, ns_steps=5, neste
     for h in range(num_heads):
         head_update = update_per_head[h]  # (head_dim, in_dim)
         orth = zeropower_via_newtonschulz5(head_update, steps=ns_steps)
-        orth *= max(1, orth.size(-2) / orth.size(-1))**0.5
+        orth *= max(1, orth.size(-2) / orth.size(-1)) ** 0.5
         orthogonalized.append(orth)
 
     # Stack back: (num_heads, head_dim, in_dim) -> (num_heads * head_dim, in_dim)
@@ -83,8 +86,8 @@ def adam_update(grad, buf1, buf2, step, betas, eps):
     """Adam update (from muon library)"""
     buf1.lerp_(grad, 1 - betas[0])
     buf2.lerp_(grad.square(), 1 - betas[1])
-    buf1c = buf1 / (1 - betas[0]**step)
-    buf2c = buf2 / (1 - betas[1]**step)
+    buf1c = buf1 / (1 - betas[0] ** step)
+    buf2c = buf2 / (1 - betas[1] ** step)
     return buf1c / (buf2c.sqrt() + eps)
 
 
@@ -100,25 +103,26 @@ class K3Optimizer(torch.optim.Optimizer):
     - 'muon': Standard Muon for other 2D+ parameters
     - 'adam': Adam for 1D parameters and embeddings
     """
+
     def __init__(self, param_groups):
         for group in param_groups:
-            assert 'optimizer_type' in group, "Each param group must have 'optimizer_type' field"
-            opt_type = group['optimizer_type']
+            assert "optimizer_type" in group, "Each param group must have 'optimizer_type' field"
+            opt_type = group["optimizer_type"]
 
-            if opt_type == 'per_head_muon':
-                assert 'num_heads' in group, "Per-head Muon requires 'num_heads' field"
-                group['lr'] = group.get('lr', 0.02)
-                group['momentum'] = group.get('momentum', 0.95)
-                group['weight_decay'] = group.get('weight_decay', 0)
-            elif opt_type == 'muon':
-                group['lr'] = group.get('lr', 0.02)
-                group['momentum'] = group.get('momentum', 0.95)
-                group['weight_decay'] = group.get('weight_decay', 0)
-            elif opt_type == 'adam':
-                group['lr'] = group.get('lr', 3e-4)
-                group['betas'] = group.get('betas', (0.9, 0.95))
-                group['eps'] = group.get('eps', 1e-10)
-                group['weight_decay'] = group.get('weight_decay', 0)
+            if opt_type == "per_head_muon":
+                assert "num_heads" in group, "Per-head Muon requires 'num_heads' field"
+                group["lr"] = group.get("lr", 0.02)
+                group["momentum"] = group.get("momentum", 0.95)
+                group["weight_decay"] = group.get("weight_decay", 0)
+            elif opt_type == "muon":
+                group["lr"] = group.get("lr", 0.02)
+                group["momentum"] = group.get("momentum", 0.95)
+                group["weight_decay"] = group.get("weight_decay", 0)
+            elif opt_type == "adam":
+                group["lr"] = group.get("lr", 3e-4)
+                group["betas"] = group.get("betas", (0.9, 0.95))
+                group["eps"] = group.get("eps", 1e-10)
+                group["weight_decay"] = group.get("weight_decay", 0)
             else:
                 raise ValueError(f"Unknown optimizer_type: {opt_type}")
 
@@ -132,61 +136,53 @@ class K3Optimizer(torch.optim.Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            opt_type = group['optimizer_type']
+            opt_type = group["optimizer_type"]
 
-            if opt_type == 'per_head_muon':
+            if opt_type == "per_head_muon":
                 # Per-head Muon for Q, K, V projections
-                for p in group['params']:
+                for p in group["params"]:
                     if p.grad is None:
                         p.grad = torch.zeros_like(p)
                     state = self.state[p]
                     if len(state) == 0:
-                        state['momentum_buffer'] = torch.zeros_like(p)
+                        state["momentum_buffer"] = torch.zeros_like(p)
 
                     update = per_head_muon_update(
-                        p.grad,
-                        state['momentum_buffer'],
-                        num_heads=group['num_heads'],
-                        beta=group['momentum']
+                        p.grad, state["momentum_buffer"], num_heads=group["num_heads"], beta=group["momentum"]
                     )
-                    p.mul_(1 - group['lr'] * group['weight_decay'])
-                    p.add_(update.reshape(p.shape), alpha=-group['lr'])
+                    p.mul_(1 - group["lr"] * group["weight_decay"])
+                    p.add_(update.reshape(p.shape), alpha=-group["lr"])
 
-            elif opt_type == 'muon':
+            elif opt_type == "muon":
                 # Standard Muon for other matrix parameters
-                for p in group['params']:
+                for p in group["params"]:
                     if p.grad is None:
                         p.grad = torch.zeros_like(p)
                     state = self.state[p]
                     if len(state) == 0:
-                        state['momentum_buffer'] = torch.zeros_like(p)
+                        state["momentum_buffer"] = torch.zeros_like(p)
 
-                    update = muon_update(p.grad, state['momentum_buffer'], beta=group['momentum'])
-                    p.mul_(1 - group['lr'] * group['weight_decay'])
-                    p.add_(update.reshape(p.shape), alpha=-group['lr'])
+                    update = muon_update(p.grad, state["momentum_buffer"], beta=group["momentum"])
+                    p.mul_(1 - group["lr"] * group["weight_decay"])
+                    p.add_(update.reshape(p.shape), alpha=-group["lr"])
 
-            elif opt_type == 'adam':
+            elif opt_type == "adam":
                 # Adam for embeddings, norms, and other non-matrix params
-                for p in group['params']:
+                for p in group["params"]:
                     if p.grad is None:
                         p.grad = torch.zeros_like(p)
                     state = self.state[p]
                     if len(state) == 0:
-                        state['exp_avg'] = torch.zeros_like(p)
-                        state['exp_avg_sq'] = torch.zeros_like(p)
-                        state['step'] = 0
-                    state['step'] += 1
+                        state["exp_avg"] = torch.zeros_like(p)
+                        state["exp_avg_sq"] = torch.zeros_like(p)
+                        state["step"] = 0
+                    state["step"] += 1
 
                     update = adam_update(
-                        p.grad,
-                        state['exp_avg'],
-                        state['exp_avg_sq'],
-                        state['step'],
-                        group['betas'],
-                        group['eps']
+                        p.grad, state["exp_avg"], state["exp_avg_sq"], state["step"], group["betas"], group["eps"]
                     )
-                    p.mul_(1 - group['lr'] * group['weight_decay'])
-                    p.add_(update, alpha=-group['lr'])
+                    p.mul_(1 - group["lr"] * group["weight_decay"])
+                    p.add_(update, alpha=-group["lr"])
 
         return loss
 
@@ -209,7 +205,7 @@ def create_k3_optimizer(model, cfg, muon_lr=0.005):
 
     for name, param in model.named_parameters():
         # Q, K, V projections in KimiDeltaAttention and GatedMLA get per-head Muon
-        if param.ndim >= 2 and any(x in name for x in ['q_lin', 'k_lin', 'v_lin', 'q_up', 'k_up', 'v_up']):
+        if param.ndim >= 2 and any(x in name for x in ["q_lin", "k_lin", "v_lin", "q_up", "k_up", "v_up"]):
             per_head_muon_params.append((name, param))
         # Other 2D+ parameters (excluding embeddings) get standard Muon
         elif param.ndim >= 2 and "embed" not in name.lower():
@@ -223,31 +219,37 @@ def create_k3_optimizer(model, cfg, muon_lr=0.005):
     # Per-head Muon for Q, K, V projections
     if per_head_muon_params:
         for name, param in per_head_muon_params:
-            param_groups.append({
-                'params': [param],
-                'optimizer_type': 'per_head_muon',
-                'num_heads': cfg.num_heads,
-                'lr': muon_lr,
-                'momentum': 0.95,
-            })
+            param_groups.append(
+                {
+                    "params": [param],
+                    "optimizer_type": "per_head_muon",
+                    "num_heads": cfg.num_heads,
+                    "lr": muon_lr,
+                    "momentum": 0.95,
+                }
+            )
 
     # Standard Muon for other matrix parameters
     if muon_params:
-        param_groups.append({
-            'params': muon_params,
-            'optimizer_type': 'muon',
-            'lr': muon_lr,
-            'momentum': 0.95,
-        })
+        param_groups.append(
+            {
+                "params": muon_params,
+                "optimizer_type": "muon",
+                "lr": muon_lr,
+                "momentum": 0.95,
+            }
+        )
 
     # Adam for 1D parameters and embeddings
     if adam_params:
-        param_groups.append({
-            'params': adam_params,
-            'optimizer_type': 'adam',
-            'lr': muon_lr / 10,
-            'betas': (0.9, 0.95),
-            'eps': 1e-10,
-        })
+        param_groups.append(
+            {
+                "params": adam_params,
+                "optimizer_type": "adam",
+                "lr": muon_lr / 10,
+                "betas": (0.9, 0.95),
+                "eps": 1e-10,
+            }
+        )
 
     return K3Optimizer(param_groups)

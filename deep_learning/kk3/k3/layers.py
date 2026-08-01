@@ -61,7 +61,7 @@ def kda_recurrence(q, k, v, alpha, beta):
     outs = []
     for t in range(T):
         k_t, v_t, a_t, b_t = k[:, t], v[:, t], alpha[:, t], beta[:, t]
-        S = S * a_t.unsqueeze(-1)                                   # decay the running state
+        S = S * a_t.unsqueeze(-1)  # decay the running state
         kS = torch.einsum("bhk,bhkv->bhv", k_t, S)
         S = S - b_t.unsqueeze(-1).unsqueeze(-1) * torch.einsum("bhk,bhv->bhkv", k_t, kS)
         S = S + b_t.unsqueeze(-1).unsqueeze(-1) * torch.einsum("bhk,bhv->bhkv", k_t, v_t)
@@ -81,16 +81,16 @@ class KimiDeltaAttention(nn.Module):
         self.k_lin, self.k_conv = nn.Linear(d, H * Dk, bias=False), ShortConv(H * Dk, cfg.conv_kernel_size)
         self.v_lin, self.v_conv = nn.Linear(d, H * Dv, bias=False), ShortConv(H * Dv, cfg.conv_kernel_size)
 
-        self.beta_lin = nn.Linear(d, H, bias=True)                  # per-head write strength
+        self.beta_lin = nn.Linear(d, H, bias=True)  # per-head write strength
 
-        self.alpha_down = nn.Linear(d, H * r, bias=False)           # low-rank projection for the decay logits
-        self.alpha_up = nn.Parameter(torch.randn(H, r, Dk) * (r ** -0.5))
+        self.alpha_down = nn.Linear(d, H * r, bias=False)  # low-rank projection for the decay logits
+        self.alpha_up = nn.Parameter(torch.randn(H, r, Dk) * (r**-0.5))
         self.alpha_bias = nn.Parameter(torch.zeros(H, Dk))
-        self.log_scale = nn.Parameter(torch.zeros(H))               # per-head decay log-scale
+        self.log_scale = nn.Parameter(torch.zeros(H))  # per-head decay log-scale
         self.gmin = cfg.kda_gmin
 
-        self.out_gate = nn.Linear(d, H * Dv, bias=False)            # full-rank output gate
-        self.out_norm = RMSNorm(Dv)                                 # per-head norm before gating
+        self.out_gate = nn.Linear(d, H * Dv, bias=False)  # full-rank output gate
+        self.out_norm = RMSNorm(Dv)  # per-head norm before gating
         self.out_proj = nn.Linear(H * Dv, d, bias=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -101,7 +101,7 @@ class KimiDeltaAttention(nn.Module):
         k = l2norm(F.silu(self.k_conv(self.k_lin(x))).view(B, T, H, Dk))
         v = F.silu(self.v_conv(self.v_lin(x))).view(B, T, H, Dv)
 
-        beta = torch.sigmoid(self.beta_lin(x))                       # (B,T,H)
+        beta = torch.sigmoid(self.beta_lin(x))  # (B,T,H)
 
         z = torch.einsum("bthr,hrk->bthk", self.alpha_down(x).view(B, T, H, -1), self.alpha_up)
         z = z + self.alpha_bias
@@ -159,11 +159,11 @@ class QuantileBalancingRouter(nn.Module):
         self.num_experts = num_experts
 
     def forward(self, x: torch.Tensor):  # x: (N, d)
-        s = torch.sigmoid(self.w_r(x))                  # router scores
+        s = torch.sigmoid(self.w_r(x))  # router scores
         biased = s + self.bias
         top_val, top_idx = biased.topk(self.k + 1, dim=-1)
         routed_idx = top_idx[:, : self.k]
-        cutoff = top_val[:, self.k]                      # score of the expert just missing the cut
+        cutoff = top_val[:, self.k]  # score of the expert just missing the cut
 
         routed_raw = torch.gather(s, -1, routed_idx)
         weights = routed_raw / routed_raw.sum(-1, keepdim=True).clamp_min(1e-9)
@@ -191,12 +191,16 @@ class StableLatentMoE(nn.Module):
 
         self.router = QuantileBalancingRouter(d, cfg.num_routed_experts, cfg.num_experts_active)
         self.routed_experts = nn.ModuleList(
-            [SiTUGLU(l, cfg.moe_hidden_per_expert, cfg.situglu_beta1, cfg.situglu_beta2)
-             for _ in range(cfg.num_routed_experts)]
+            [
+                SiTUGLU(l, cfg.moe_hidden_per_expert, cfg.situglu_beta1, cfg.situglu_beta2)
+                for _ in range(cfg.num_routed_experts)
+            ]
         )
         self.shared_experts = nn.ModuleList(
-            [SiTUGLU(d, cfg.shared_moe_hidden, cfg.situglu_beta1, cfg.situglu_beta2)
-             for _ in range(cfg.num_shared_experts)]
+            [
+                SiTUGLU(d, cfg.shared_moe_hidden, cfg.situglu_beta1, cfg.situglu_beta2)
+                for _ in range(cfg.num_shared_experts)
+            ]
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -204,7 +208,7 @@ class StableLatentMoE(nn.Module):
         flat = x.reshape(-1, d)
         z = self.down(flat)
 
-        idx, weights = self.router(flat)                 # (N,k), (N,k)
+        idx, weights = self.router(flat)  # (N,k), (N,k)
         u = flat.new_zeros(flat.shape[0], z.shape[-1])
         for e, expert in enumerate(self.routed_experts):
             hit = idx == e
@@ -225,11 +229,11 @@ class StableLatentMoE(nn.Module):
 class AttnResGate(nn.Module):
     def __init__(self, dim: int):
         super().__init__()
-        self.q = nn.Parameter(torch.randn(dim) * dim ** -0.5)
+        self.q = nn.Parameter(torch.randn(dim) * dim**-0.5)
         self.norm = RMSNorm(dim)
 
     def forward(self, reps: list) -> torch.Tensor:
-        stacked = torch.stack(reps, dim=-2)                       # (B, T, N, d)
+        stacked = torch.stack(reps, dim=-2)  # (B, T, N, d)
         logits = torch.einsum("d,btnd->btn", self.q, self.norm(stacked))
         alpha = torch.softmax(logits, dim=-1)
         return torch.einsum("btn,btnd->btd", alpha, stacked)

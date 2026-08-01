@@ -35,6 +35,7 @@ warnings.filterwarnings("ignore")
 @dataclass
 class UnifiedSample:
     """Unified schema for all multimodal samples."""
+
     id: int  # Simple integer ID
     text: str
     modality: str  # "text", "image", "video", "audio", "video-audio"
@@ -68,10 +69,7 @@ class UnifiedSample:
             result["video_frames"] = self.video_frames
             result["num_frames"] = self.num_frames
         if self.audio_array is not None:
-            result["audio"] = {
-                "array": self.audio_array,
-                "sampling_rate": self.audio_sampling_rate
-            }
+            result["audio"] = {"array": self.audio_array, "sampling_rate": self.audio_sampling_rate}
         if self.duration_sec is not None:
             result["duration_sec"] = self.duration_sec
 
@@ -134,11 +132,7 @@ class FineWebExtractor(DatasetExtractor):
                 for idx, row in enumerate(tqdm(ds, total=train_size, desc="FineWeb train")):
                     if idx >= train_size:
                         break
-                    yield {
-                        "id": idx,
-                        "text": row["text"],
-                        "modality": "text"
-                    }
+                    yield {"id": idx, "text": row["text"], "modality": "text"}
 
             def valid_generator():
                 # Skip train samples
@@ -147,11 +141,7 @@ class FineWebExtractor(DatasetExtractor):
                         continue
                     if idx >= train_size + valid_size:
                         break
-                    yield {
-                        "id": idx - train_size,
-                        "text": row["text"],
-                        "modality": "text"
-                    }
+                    yield {"id": idx - train_size, "text": row["text"], "modality": "text"}
 
             def test_generator():
                 # Skip train + valid samples
@@ -160,30 +150,32 @@ class FineWebExtractor(DatasetExtractor):
                         continue
                     if idx >= train_size + valid_size + test_size:
                         break
-                    yield {
-                        "id": idx - train_size - valid_size,
-                        "text": row["text"],
-                        "modality": "text"
-                    }
+                    yield {"id": idx - train_size - valid_size, "text": row["text"], "modality": "text"}
 
             # Create datasets from generators
             click.echo("  Converting to HF datasets (streaming)...")
-            dataset_dict = DatasetDict({
-                "train": Dataset.from_generator(train_generator),
-                "valid": Dataset.from_generator(valid_generator),
-                "test": Dataset.from_generator(test_generator)
-            })
+            dataset_dict = DatasetDict(
+                {
+                    "train": Dataset.from_generator(train_generator),
+                    "valid": Dataset.from_generator(valid_generator),
+                    "test": Dataset.from_generator(test_generator),
+                }
+            )
 
             total = sum(len(d) for d in dataset_dict.values())
-            click.echo(f"✓ FineWeb: {total} samples (train:{len(dataset_dict['train'])}, valid:{len(dataset_dict['valid'])}, test:{len(dataset_dict['test'])})")
+            click.echo(
+                f"✓ FineWeb: {total} samples (train:{len(dataset_dict['train'])}, valid:{len(dataset_dict['valid'])}, test:{len(dataset_dict['test'])})"
+            )
 
             import gc
+
             gc.collect()
             return dataset_dict
 
         except Exception as e:
             click.secho(f"⚠ FineWeb unavailable: {e}", fg="yellow")
             import traceback
+
             traceback.print_exc()
             return DatasetDict()
 
@@ -246,18 +238,23 @@ class COCOCaptionExtractor(DatasetExtractor):
 
             # Create datasets from generators
             click.echo("  Converting to HF datasets (streaming)...")
-            dataset_dict = DatasetDict({
-                "train": Dataset.from_generator(train_generator),
-                "valid": Dataset.from_generator(valid_generator),
-                "test": Dataset.from_generator(test_generator)
-            })
+            dataset_dict = DatasetDict(
+                {
+                    "train": Dataset.from_generator(train_generator),
+                    "valid": Dataset.from_generator(valid_generator),
+                    "test": Dataset.from_generator(test_generator),
+                }
+            )
 
             total = sum(len(d) for d in dataset_dict.values())
-            click.echo(f"✓ COCO: {total} samples (train:{len(dataset_dict['train'])}, valid:{len(dataset_dict['valid'])}, test:{len(dataset_dict['test'])})")
+            click.echo(
+                f"✓ COCO: {total} samples (train:{len(dataset_dict['train'])}, valid:{len(dataset_dict['valid'])}, test:{len(dataset_dict['test'])})"
+            )
 
             # Clean up
             del ds
             import gc
+
             gc.collect()
 
             return dataset_dict
@@ -265,6 +262,7 @@ class COCOCaptionExtractor(DatasetExtractor):
         except Exception as e:
             click.secho(f"⚠ COCO unavailable: {e}", fg="yellow")
             import traceback
+
             traceback.print_exc()
             return DatasetDict()
 
@@ -303,7 +301,7 @@ class AudioSetExtractor(DatasetExtractor):
                         "modality": "audio",
                         "audio": {
                             "array": audio_data["array"] if audio_data else None,
-                            "sampling_rate": audio_data["sampling_rate"] if audio_data else None
+                            "sampling_rate": audio_data["sampling_rate"] if audio_data else None,
                         },
                     }
                     count += 1
@@ -323,7 +321,7 @@ class AudioSetExtractor(DatasetExtractor):
                         "modality": "audio",
                         "audio": {
                             "array": audio_data["array"] if audio_data else None,
-                            "sampling_rate": audio_data["sampling_rate"] if audio_data else None
+                            "sampling_rate": audio_data["sampling_rate"] if audio_data else None,
                         },
                     }
                     count += 1
@@ -347,25 +345,30 @@ class AudioSetExtractor(DatasetExtractor):
                         "modality": "audio",
                         "audio": {
                             "array": audio_data["array"] if audio_data else None,
-                            "sampling_rate": audio_data["sampling_rate"] if audio_data else None
+                            "sampling_rate": audio_data["sampling_rate"] if audio_data else None,
                         },
                     }
                     count += 1
 
             click.echo("  Converting to HF datasets...")
-            dataset_dict = DatasetDict({
-                "train": Dataset.from_generator(train_generator),
-                "valid": Dataset.from_generator(valid_generator),
-                "test": Dataset.from_generator(test_generator)
-            })
+            dataset_dict = DatasetDict(
+                {
+                    "train": Dataset.from_generator(train_generator),
+                    "valid": Dataset.from_generator(valid_generator),
+                    "test": Dataset.from_generator(test_generator),
+                }
+            )
 
             total = sum(len(d) for d in dataset_dict.values())
-            click.echo(f"✓ AudioSet: {total} samples (train:{len(dataset_dict['train'])}, valid:{len(dataset_dict['valid'])}, test:{len(dataset_dict['test'])})")
+            click.echo(
+                f"✓ AudioSet: {total} samples (train:{len(dataset_dict['train'])}, valid:{len(dataset_dict['valid'])}, test:{len(dataset_dict['test'])})"
+            )
             return dataset_dict
 
         except Exception as e:
             click.secho(f"⚠ AudioSet unavailable: {e}", fg="yellow")
             import traceback
+
             traceback.print_exc()
             return DatasetDict()
 
@@ -379,7 +382,7 @@ def combine_datasets(
     output_dir: Path,
     num_workers: int = 16,
     push_to_hub: bool = False,
-    hub_name: str = None
+    hub_name: str = None,
 ) -> Dict[str, Dict]:
     """
     Extract datasets SEQUENTIALLY and PUSH IMMEDIATELY to avoid RAM overload.
@@ -407,6 +410,7 @@ def combine_datasets(
         try:
             if push_to_hub and hub_name:
                 from huggingface_hub import HfApi
+
                 api = HfApi()
                 try:
                     files = list(api.list_repo_files(hub_name, repo_type="dataset"))
@@ -416,7 +420,7 @@ def combine_datasets(
                 except Exception:
                     pass
 
-            if hasattr(extractor, 'extract_to_dataset'):
+            if hasattr(extractor, "extract_to_dataset"):
                 dataset_dict = extractor.extract_to_dataset()
             else:
                 # Old method: extract to lists, then convert
@@ -427,11 +431,13 @@ def combine_datasets(
                     continue
 
                 # Convert to DatasetDict
-                dataset_dict = DatasetDict({
-                    split_name: Dataset.from_list([s.to_dict() for s in samples])
-                    for split_name, samples in splits_dict.items()
-                    if samples
-                })
+                dataset_dict = DatasetDict(
+                    {
+                        split_name: Dataset.from_list([s.to_dict() for s in samples])
+                        for split_name, samples in splits_dict.items()
+                        if samples
+                    }
+                )
 
                 total = sum(len(d) for d in dataset_dict.values())
                 click.echo(f"  Converted {total} samples to HF dataset")
@@ -439,6 +445,7 @@ def combine_datasets(
                 # Free the splits_dict immediately
                 del splits_dict
                 import gc
+
                 gc.collect()
 
             if not dataset_dict:
@@ -459,27 +466,26 @@ def combine_datasets(
                     click.secho(f"  ✗ Push failed: {e}", fg="red")
 
             total = sum(len(d) for d in dataset_dict.values())
-            all_metadata[config_name] = {
-                "total": total,
-                "splits": {k: len(v) for k, v in dataset_dict.items()}
-            }
+            all_metadata[config_name] = {"total": total, "splits": {k: len(v) for k, v in dataset_dict.items()}}
 
             del dataset_dict
             import gc
+
             gc.collect()
             click.echo()
 
         except Exception as e:
             click.secho(f"✗ {config_name} failed: {e}", fg="red")
             import traceback
+
             traceback.print_exc()
             continue
 
     # Print overall statistics
-    click.echo("="*60)
+    click.echo("=" * 60)
     click.echo(f"📊 Summary: {len(all_metadata)} configs extracted")
     for config_name, metadata in all_metadata.items():
-        splits_info = ', '.join(f"{k}:{v}" for k, v in metadata['splits'].items())
+        splits_info = ", ".join(f"{k}:{v}" for k, v in metadata["splits"].items())
         click.echo(f"  ✓ {config_name}: {metadata['total']} samples ({splits_info})")
 
     click.secho(f"\n✓ All datasets saved to {output_dir}", fg="green")
@@ -488,10 +494,17 @@ def combine_datasets(
 
 
 @click.command()
-@click.option("--cache-dir", type=click.Path(), default="/media/starscream/bumblebee1/hf_cache", help="Cache directory for downloads (default: bumblebee1, 235GB free)")
+@click.option(
+    "--cache-dir",
+    type=click.Path(),
+    default="/media/starscream/bumblebee1/hf_cache",
+    help="Cache directory for downloads (default: bumblebee1, 235GB free)",
+)
 @click.option("--output-dir", type=click.Path(), default="./unified_dataset", help="Output directory")
 @click.option("--num-workers", type=int, default=16, help="Number of parallel workers")
-@click.option("--datasets", type=str, default="fineweb,coco,audioset", help="Comma-separated list: fineweb,coco,audioset")
+@click.option(
+    "--datasets", type=str, default="fineweb,coco,audioset", help="Comma-separated list: fineweb,coco,audioset"
+)
 @click.option("--push-to-hub", is_flag=True, help="Push to HuggingFace Hub after creation")
 @click.option("--hub-name", type=str, help="HuggingFace Hub dataset name (e.g., username/dataset-name)")
 def main(cache_dir: str, output_dir: str, num_workers: int, datasets: str, push_to_hub: bool, hub_name: str):
@@ -546,17 +559,13 @@ def main(cache_dir: str, output_dir: str, num_workers: int, datasets: str, push_
 
     # Extract all datasets (pushes to Hub immediately if requested)
     # Returns metadata dict (NOT full datasets, to save memory)
-    all_metadata = combine_datasets(
-        extractors,
-        output_path,
-        num_workers,
-        push_to_hub=push_to_hub,
-        hub_name=hub_name
-    )
+    all_metadata = combine_datasets(extractors, output_path, num_workers, push_to_hub=push_to_hub, hub_name=hub_name)
 
     # Print final summary and upload README
     if push_to_hub and all_metadata:
-        click.secho(f"\n✅ All {len(all_metadata)} configs uploaded to https://huggingface.co/datasets/{hub_name}", fg="green")
+        click.secho(
+            f"\n✅ All {len(all_metadata)} configs uploaded to https://huggingface.co/datasets/{hub_name}", fg="green"
+        )
 
         # Upload README.md dataset card
         readme_path = Path("README.md")
@@ -564,6 +573,7 @@ def main(cache_dir: str, output_dir: str, num_workers: int, datasets: str, push_
             click.echo("\n📄 Uploading dataset card (README.md)...")
             try:
                 from huggingface_hub import HfApi
+
                 api = HfApi()
                 api.upload_file(
                     path_or_fileobj=str(readme_path),

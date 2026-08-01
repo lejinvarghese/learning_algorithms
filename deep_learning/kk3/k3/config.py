@@ -6,32 +6,32 @@ from dataclasses import dataclass
 @dataclass
 class K3Config:
     # --- token / sequence ---
-    vocab_size: int = 32_000            # Kimi K3: 160_000 (shrunk for a toy tokenizer)
-    max_seq_len: int = 1024             # Kimi K3: extends up to 1M tokens via progressive training
+    vocab_size: int = 32_000  # Kimi K3: 160_000 (shrunk for a toy tokenizer)
+    max_seq_len: int = 1024  # Kimi K3: extends up to 1M tokens via progressive training
 
     # --- backbone width/depth (Kimi K3: hidden=7168, 93 layers, 8 attention-residual blocks) ---
     hidden_dim: int = 256
-    num_blocks: int = 4                 # attention-residual blocks (Kimi K3: 8, block size 12)
-    layers_per_block: int = 4           # must be a multiple of (kda_mla_ratio + 1)
-    kda_mla_ratio: int = 3              # KDA layers per Gated MLA layer (Kimi K3: ~3:1)
+    num_blocks: int = 4  # attention-residual blocks (Kimi K3: 8, block size 12)
+    layers_per_block: int = 4  # must be a multiple of (kda_mla_ratio + 1)
+    kda_mla_ratio: int = 3  # KDA layers per Gated MLA layer (Kimi K3: ~3:1)
 
     # --- attention (Kimi K3: 96 heads) ---
     num_heads: int = 8
-    conv_kernel_size: int = 4           # causal short-conv kernel applied to KDA's q/k/v
-    kda_decay_rank: int = 8             # low-rank projection rank for KDA's decay logits
-    kda_gmin: float = -5.0              # lower bound on KDA's log-decay
-    mla_latent_dim: int = 128           # MLA q/kv compression width
+    conv_kernel_size: int = 4  # causal short-conv kernel applied to KDA's q/k/v
+    kda_decay_rank: int = 8  # low-rank projection rank for KDA's decay logits
+    kda_gmin: float = -5.0  # lower bound on KDA's log-decay
+    mla_latent_dim: int = 128  # MLA q/kv compression width
 
     # --- Stable LatentMoE (Kimi K3: 896 routed / 16 active / 2 shared, latent = 0.5x hidden) ---
-    latent_moe_ratio: float = 0.5       # latent width = ratio * hidden_dim
+    latent_moe_ratio: float = 0.5  # latent width = ratio * hidden_dim
     num_routed_experts: int = 32
-    num_experts_active: int = 4         # kept sparse; Kimi K3's exact sparsity ratio isn't
-                                         # reachable once the expert pool itself is this small
-    num_shared_experts: int = 2         # fixed by design, not scaled
+    num_experts_active: int = 4  # kept sparse; Kimi K3's exact sparsity ratio isn't
+    # reachable once the expert pool itself is this small
+    num_shared_experts: int = 2  # fixed by design, not scaled
     moe_hidden_per_expert: int = 128
-    shared_moe_hidden: int = 256        # shared-expert FFN hidden width
-    situglu_beta1: float = 4.0          # SiTU-GLU gate-branch softcap
-    situglu_beta2: float = 25.0         # SiTU-GLU up-branch softcap
+    shared_moe_hidden: int = 256  # shared-expert FFN hidden width
+    situglu_beta1: float = 4.0  # SiTU-GLU gate-branch softcap
+    situglu_beta2: float = 25.0  # SiTU-GLU up-branch softcap
 
     # --- multi-token prediction (Kimi K3: exactly one extra layer, not scaled) ---
     use_mtp: bool = True
@@ -41,7 +41,7 @@ class K3Config:
     vit_layers: int = 4
     vit_hidden: int = 128
     vit_heads: int = 4
-    vit_patch_size: int = 14            # kept equal to Kimi K3: input granularity, not model scale
+    vit_patch_size: int = 14  # kept equal to Kimi K3: input granularity, not model scale
     vit_mlp_ratio: float = 4.0
     vit_num_frames: int = 8
     vit_temporal_pool: int = 2
@@ -51,9 +51,9 @@ class K3Config:
 
     def __post_init__(self):
         assert self.hidden_dim % self.num_heads == 0, "hidden_dim must be divisible by num_heads"
-        assert self.layers_per_block % (self.kda_mla_ratio + 1) == 0, (
-            "layers_per_block must be a multiple of (kda_mla_ratio + 1) to tile whole groups"
-        )
+        assert (
+            self.layers_per_block % (self.kda_mla_ratio + 1) == 0
+        ), "layers_per_block must be a multiple of (kda_mla_ratio + 1) to tile whole groups"
         assert self.num_experts_active <= self.num_routed_experts
         if self.use_vision:
             assert self.vit_hidden % self.vit_heads == 0

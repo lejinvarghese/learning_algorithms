@@ -9,14 +9,26 @@ from torch.utils.data import Dataset
 CACHE_DIR = Path.home() / ".cache" / "k3-toy-videos"
 
 CLIPS = [
-    ("https://huggingface.co/datasets/hf-internal-testing/tiny-video-dataset/resolve/main/videos/00001.mp4",
-     "hiker.mp4", "a hiker standing on a mountain peak at sunrise"),
-    ("https://huggingface.co/datasets/nielsr/video-demo/resolve/main/eating_spaghetti.mp4",
-     "spaghetti.mp4", "a person eating spaghetti"),
-    ("https://huggingface.co/datasets/sayakpaul/ucf101-subset/resolve/main/v_BabyCrawling_g19_c02.avi",
-     "baby_crawling.avi", "a baby crawling"),
-    ("https://huggingface.co/datasets/sayakpaul/ucf101-subset/resolve/main/v_BasketballDunk_g14_c06.avi",
-     "basketball_dunk.avi", "a basketball player dunking"),
+    (
+        "https://huggingface.co/datasets/hf-internal-testing/tiny-video-dataset/resolve/main/videos/00001.mp4",
+        "hiker.mp4",
+        "a hiker standing on a mountain peak at sunrise",
+    ),
+    (
+        "https://huggingface.co/datasets/nielsr/video-demo/resolve/main/eating_spaghetti.mp4",
+        "spaghetti.mp4",
+        "a person eating spaghetti",
+    ),
+    (
+        "https://huggingface.co/datasets/sayakpaul/ucf101-subset/resolve/main/v_BabyCrawling_g19_c02.avi",
+        "baby_crawling.avi",
+        "a baby crawling",
+    ),
+    (
+        "https://huggingface.co/datasets/sayakpaul/ucf101-subset/resolve/main/v_BasketballDunk_g14_c06.avi",
+        "basketball_dunk.avi",
+        "a basketball player dunking",
+    ),
 ]
 
 
