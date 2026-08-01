@@ -1,32 +1,18 @@
 import click
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from pathlib import Path
 from accelerate import Accelerator
-from torch.optim import AdamW
 from torch.utils.data import ConcatDataset, DataLoader
 
 from k3 import K3Config, K3Model
-from k3.data import ToyMultimodalDataset
 from k3.eval import evaluate
 from k3.hf_data import HFImageCaptionDataset, HFTextDataset
-from k3.video import RealVideoDataset
 
-from muon import SingleDeviceMuon as Muon
+from optimizer import K3Optimizer
 
 
-def _datasets(toy, n_train, n_eval, seq_len, frame_size, num_frames):
-    if toy:
-        train_sets = [
-            ToyMultimodalDataset(32, seq_len, frame_size, num_frames, seed=0),
-            RealVideoDataset(num_frames, frame_size, seq_len, split="train"),
-        ]
-        test_sets = [
-            ToyMultimodalDataset(16, seq_len, frame_size, num_frames, seed=1),
-            RealVideoDataset(num_frames, frame_size, seq_len, split="test"),
-        ]
-        return ConcatDataset(train_sets), ConcatDataset(test_sets)
+def _datasets(n_train, n_eval, seq_len, frame_size, num_frames):
 
     train_sets = [
         HFTextDataset("train", n_train, seq_len, frame_size, num_frames),
@@ -68,7 +54,6 @@ def _deepspeed_plugin(cpu_offload: bool):
 @click.option("--muon-lr", type=float, default=0.005, show_default=True, help="Muon optimizer learning rate")
 @click.option("--warmup-ratio", type=float, default=0.1, show_default=True, help="warmup as fraction of total steps")
 @click.option("--min-lr-ratio", type=float, default=0.1, show_default=True, help="minimum LR as fraction of peak LR")
-@click.option("--toy", is_flag=True, help="offline synthetic data instead of streaming from Hugging Face")
 def main(
     mult,
     no_vision,
@@ -86,7 +71,6 @@ def main(
     muon_lr,
     warmup_ratio,
     min_lr_ratio,
-    toy,
 ):
     accelerator = Accelerator(
         gradient_accumulation_steps=grad_accum,
@@ -101,63 +85,86 @@ def main(
     counts = model.param_counts()
 
     frame_size = cfg.vit_patch_size * 8
-    train_data, test_data = _datasets(toy, n_train, n_eval, seq_len, frame_size, num_frames)
+    train_data, test_data = _datasets(n_train, n_eval, seq_len, frame_size, num_frames)
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, drop_last=True)
     test_loader = DataLoader(test_data, batch_size=batch_size)
 
-    # Hybrid optimizer: Muon for 2D+ params (conv/linear), AdamW for 1D (embed/norm)
+    # K3 optimizer: per-head Muon for Q/K/V, standard Muon for other 2D+, Adam for 1D
+    per_head_muon_params = []
     muon_params = []
-    adamw_params = []
+    adam_params = []
+
     for name, param in model.named_parameters():
-        if param.ndim >= 2 and "embed" not in name.lower():
+        # Q, K, V projections in KimiDeltaAttention and GatedMLA get per-head Muon
+        if param.ndim >= 2 and any(x in name for x in ['q_lin', 'k_lin', 'v_lin', 'q_up', 'k_up', 'v_up']):
+            per_head_muon_params.append((name, param))
+        # Other 2D+ parameters (excluding embeddings) get standard Muon
+        elif param.ndim >= 2 and "embed" not in name.lower():
             muon_params.append(param)
+        # 1D parameters (norms, biases) and embeddings get Adam
         else:
-            adamw_params.append(param)
+            adam_params.append(param)
 
-    muon_opt = Muon(muon_params, lr=muon_lr, momentum=0.95)
-    adamw_opt = AdamW(adamw_params, lr=muon_lr / 10)  # AdamW uses 10x lower LR
+    # Create parameter groups for K3Optimizer
+    param_groups = []
 
-    class HybridOptimizer:
-        def __init__(self, muon, adamw):
-            self.muon = muon
-            self.adamw = adamw
+    # Per-head Muon for Q, K, V projections
+    if per_head_muon_params:
+        for name, param in per_head_muon_params:
+            param_groups.append({
+                'params': [param],
+                'optimizer_type': 'per_head_muon',
+                'num_heads': cfg.num_heads,
+                'lr': muon_lr,
+                'momentum': 0.95,
+            })
 
-        def step(self):
-            self.muon.step()
-            self.adamw.step()
+    # Standard Muon for other matrix parameters
+    if muon_params:
+        param_groups.append({
+            'params': muon_params,
+            'optimizer_type': 'muon',
+            'lr': muon_lr,
+            'momentum': 0.95,
+        })
 
-        def zero_grad(self):
-            self.muon.zero_grad()
-            self.adamw.zero_grad()
+    # Adam for 1D parameters and embeddings
+    if adam_params:
+        param_groups.append({
+            'params': adam_params,
+            'optimizer_type': 'adam',
+            'lr': muon_lr / 10,  # Adam uses 10x lower LR
+            'betas': (0.9, 0.95),
+            'eps': 1e-10,
+        })
 
-        def state_dict(self):
-            return {"muon": self.muon.state_dict(), "adamw": self.adamw.state_dict()}
+    opt = K3Optimizer(param_groups)
 
-        def load_state_dict(self, state_dict):
-            self.muon.load_state_dict(state_dict["muon"])
-            self.adamw.load_state_dict(state_dict["adamw"])
-
-    opt = HybridOptimizer(muon_opt, adamw_opt)
-
-    # Cosine annealing with warmup
+    # Cosine annealing with warmup using PyTorch's built-in schedulers
     total_steps = len(train_loader) * epochs
     warmup_steps = int(total_steps * warmup_ratio)
 
-    def lr_lambda(step):
-        if step < warmup_steps:
-            return step / warmup_steps
-        progress = (step - warmup_steps) / (total_steps - warmup_steps)
-        cosine_decay = 0.5 * (1 + torch.cos(torch.tensor(progress * 3.14159)))
-        return min_lr_ratio + (1 - min_lr_ratio) * cosine_decay
-
-    muon_scheduler = torch.optim.lr_scheduler.LambdaLR(muon_opt, lr_lambda)
-    adamw_scheduler = torch.optim.lr_scheduler.LambdaLR(adamw_opt, lr_lambda)
+    # Warmup phase: linear ramp from 0 to peak LR
+    warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+        opt, start_factor=1e-10, end_factor=1.0, total_iters=warmup_steps
+    )
+    # Cosine decay phase: from peak LR to min_lr_ratio * peak LR
+    cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        opt, T_max=total_steps - warmup_steps, eta_min=muon_lr * min_lr_ratio
+    )
+    # Chain them together
+    scheduler = torch.optim.lr_scheduler.SequentialLR(
+        opt, schedulers=[warmup_scheduler, cosine_scheduler], milestones=[warmup_steps]
+    )
 
     if accelerator.is_main_process:
+        n_per_head = len(per_head_muon_params)
+        n_muon = len(muon_params)
+        n_adam = len(adam_params)
         if cpu_offload:
-            click.secho(f"Using Muon ({len(muon_params)} params) + AdamW ({len(adamw_params)} params) with DeepSpeed ZeRO-2", fg="green")
+            click.secho(f"Using K3 Optimizer: {n_per_head} per-head Muon, {n_muon} Muon, {n_adam} Adam params with DeepSpeed ZeRO-2", fg="green")
         else:
-            click.secho(f"Using Muon ({len(muon_params)} params) + AdamW ({len(adamw_params)} params)", fg="green")
+            click.secho(f"Using K3 Optimizer: {n_per_head} per-head Muon, {n_muon} Muon, {n_adam} Adam params", fg="green")
         click.secho(f"LR schedule: warmup {warmup_steps}/{total_steps} steps ({warmup_ratio:.0%}), cosine decay to {min_lr_ratio:.0%} of peak", fg="cyan")
 
     model, opt, train_loader, test_loader = accelerator.prepare(model, opt, train_loader, test_loader)
@@ -222,8 +229,7 @@ def main(
                 if grad_clip > 0:
                     accelerator.clip_grad_norm_(model.parameters(), grad_clip)
                 opt.step()
-                muon_scheduler.step()
-                adamw_scheduler.step()
+                scheduler.step()
                 opt.zero_grad()
 
             if accelerator.is_main_process:
