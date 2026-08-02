@@ -65,60 +65,47 @@ quick sanity check or CI.
 ## Run
 
 ```bash
-uv sync                                # install dependencies (or pip install -r requirements.txt)
-python train.py                        # streams text + image from lv12/MultiModalDataset
-python train.py --n-train 10000        # larger dataset (10K samples per modality)
-python train.py --n-train 30000 --epochs 10 --warmup-ratio 0.1  # full dataset with cosine LR decay
-python train.py --toy                  # fully offline procedural data instead
-python train.py --mult 0.5             # scale the model down further
-python train.py --no-vision            # drop the vision tower (text only)
-python train.py --grad-checkpoint      # recompute activations on backward (lower peak memory)
-python train.py --mixed-precision bf16 # fp16/bf16 training via Accelerate
-python train.py --cpu-offload          # DeepSpeed ZeRO-2 optimizer offload (needs CUDA)
-python train.py --help                 # full option list
+uv sync                                      # install dependencies
+python train.py                              # default: 5 epochs, batch 16, 100K samples/modality
+python train.py --epochs 10                  # train for 10 epochs
+python train.py --batch-size 32              # larger batch size
+python train.py --n-train 10000              # 10K samples per modality
+python train.py --n-eval 5000                # 5K eval samples
+python train.py --epochs 10 --n-train 50000  # combine options
 ```
 
-**Learning rate schedule**: Training uses cosine annealing with warmup by default:
-- `--warmup-ratio 0.1`: Warmup for 10% of total steps (default)
-- `--min-lr-ratio 0.1`: Decay to 10% of peak LR (default)
-- `--muon-lr 0.005`: Peak learning rate (default 0.005 for Muon, 0.0005 for AdamW)
+**Available options:**
+- `--epochs`: Number of training epochs (default: 5)
+- `--batch-size`: Training batch size (default: 16)
+- `--n-train`: Training samples per modality (default: 100,000)
+- `--n-eval`: Evaluation samples per modality (default: 1,000)
 
-Each epoch logs per-step training loss, then evaluates on a held-out split (`k3/eval.py:
-evaluate`) and logs loss and next-token accuracy on unseen samples.
+**Hardcoded configuration:**
+- Optimizer: K3 (per-head Muon for Q/K/V, Muon for 2D+, Adam for 1D)
+- Learning rate: 0.005 with 1% warmup, cosine decay to 10%
+- DeepSpeed ZeRO-2 with CPU offload (auto-enabled on CUDA)
+- Gradient checkpointing enabled
+- Gradient accumulation: 4 steps
 
-`--grad-checkpoint` and `--cpu-offload` default **on**; both degrade gracefully where they don't
-apply (checkpointing costs a bit of recompute even when memory isn't tight; `--cpu-offload` is a
-silent no-op without CUDA). Training runs via [Accelerate](https://huggingface.co/docs/accelerate),
-so `python train.py` is enough for CPU, MPS, or a single GPU — `accelerate launch` is only needed
-for multi-GPU.
-
-Checkpoints are saved after each epoch to `checkpoints/k3_epoch{N}.pt`, containing model weights,
-optimizer state, config, and eval metrics.
+Training runs via [Accelerate](https://huggingface.co/docs/accelerate). Checkpoints saved to 
+`checkpoints/k3_epoch{N}.pt` after each epoch with model weights, optimizer state, config, and metrics.
 
 ## Inference
 
-After training, use `infer.py` to generate text or captions:
-
-**Text completion:**
 ```bash
-python infer.py --checkpoint checkpoints/k3_epoch3.pt --text "hello world"
-```
-
-**Image captioning:**
-```bash
-python infer.py --checkpoint checkpoints/k3_epoch3.pt --image photo.jpg
-```
-
-**Image captioning with prompt:**
-```bash
-python infer.py --checkpoint checkpoints/k3_epoch3.pt --image photo.jpg --text "a photo of"
+python infer.py --checkpoint checkpoints/k3_epoch5.pt --text "hello world"
+python infer.py --checkpoint checkpoints/k3_epoch5.pt --image photo.jpg
+python infer.py --checkpoint checkpoints/k3_epoch5.pt --image photo.jpg --text "a photo of"
+python infer.py --checkpoint checkpoints/k3_epoch5.pt --text "once upon a time" --max-tokens 128
 ```
 
 **Options:**
+- `--checkpoint`: Path to checkpoint (required)
+- `--text`: Text prompt for completion
+- `--image`: Image path for captioning
 - `--max-tokens`: Maximum tokens to generate (default: 64)
-- `--temperature`: Sampling temperature, higher = more random (default: 0.8)
-- `--device`: Force device (auto-detects CUDA/MPS/CPU if not specified)
+- `--temperature`: Sampling temperature (default: 0.8)
+- `--device`: Device override (auto-detects if not specified)
 
-The model generates byte-level sequences (UTF-8 encoding), so output is character-by-character
-rather than tokenized words. For image captioning, vision embeddings are added to text embeddings
-as continuous features (not discrete tokens), conditioning the generation on the image.
+The model generates byte-level UTF-8 sequences. For image captioning, vision embeddings condition 
+the generation as continuous features (not discrete tokens).
