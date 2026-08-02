@@ -82,10 +82,13 @@ python train.py --epochs 10 --n-train 50000  # combine options
 
 **Hardcoded configuration:**
 - Optimizer: K3 (per-head Muon for Q/K/V, Muon for 2D+, Adam for 1D)
-- Learning rate: 0.005 with 1% warmup, cosine decay to 10%
+- Learning rate: 0.001 with 20% warmup, cosine decay to 10%
+- Adaptive gradient clipping (95th percentile, min 0.5)
+- MoE auxiliary losses: router z-loss (1e-3) + load balancing (1e-2)
+- Loss spike detection: skip batches with NaN/Inf/loss>100
 - DeepSpeed ZeRO-2 with CPU offload (auto-enabled on CUDA)
 - Gradient checkpointing enabled
-- Gradient accumulation: 4 steps
+- No mixed precision (fp32 for Newton-Schulz stability)
 
 Training runs via [Accelerate](https://huggingface.co/docs/accelerate). Checkpoints saved to 
 `checkpoints/k3_epoch{N}.pt` after each epoch with model weights, optimizer state, config, and metrics.
@@ -93,10 +96,10 @@ Training runs via [Accelerate](https://huggingface.co/docs/accelerate). Checkpoi
 ## Inference
 
 ```bash
-python infer.py --checkpoint checkpoints/k3_epoch5.pt --text "hello world"
-python infer.py --checkpoint checkpoints/k3_epoch5.pt --image photo.jpg
-python infer.py --checkpoint checkpoints/k3_epoch5.pt --image photo.jpg --text "a photo of"
-python infer.py --checkpoint checkpoints/k3_epoch5.pt --text "once upon a time" --max-tokens 128
+python infer.py --checkpoint checkpoints/k3_epoch1.pt --text "hello world"
+python infer.py --checkpoint checkpoints/k3_epoch1.pt --image dog.png
+python infer.py --checkpoint checkpoints/k3_epoch1.pt --image photo.jpg --text "a photo of"
+python infer.py --checkpoint checkpoints/k3_epoch1.pt --text "once upon a time" --max-tokens 128
 ```
 
 **Options:**
@@ -109,3 +112,11 @@ python infer.py --checkpoint checkpoints/k3_epoch5.pt --text "once upon a time" 
 
 The model generates byte-level UTF-8 sequences. For image captioning, vision embeddings condition 
 the generation as continuous features (not discrete tokens).
+
+## Publish to HuggingFace
+
+```bash
+python convert_to_hf.py --checkpoint checkpoints/k3_epoch5.pt --output my_model
+huggingface-cli login
+huggingface-cli upload username/model-name ./my_model
+```

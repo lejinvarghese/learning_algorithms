@@ -12,7 +12,7 @@ def evaluate(model, loader: DataLoader, vocab_size: int, device: str) -> dict:
     for ids, images, has_visual in loader:
         ids, images, has_visual = ids.to(device), images.to(device), has_visual.to(device)
 
-        logits, _ = model(ids, images=images, has_visual=has_visual)
+        logits, _, _ = model(ids, images=images, has_visual=has_visual)
         targets = ids.roll(-1, dims=1)[:, :-1]
         logits = logits[:, :-1]
 

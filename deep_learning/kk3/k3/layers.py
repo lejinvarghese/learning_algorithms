@@ -150,6 +150,7 @@ class GatedMLA(nn.Module):
 
 # Auxiliary-loss-free expert routing: the bias term is set, per batch, to the exact quantile
 # that yields the target load per expert, rather than nudged there by a fixed step size.
+# Additionally computes router z-loss and load balancing loss for stability.
 class QuantileBalancingRouter(nn.Module):
     def __init__(self, dim: int, num_experts: int, k: int):
         super().__init__()
@@ -159,7 +160,15 @@ class QuantileBalancingRouter(nn.Module):
         self.num_experts = num_experts
 
     def forward(self, x: torch.Tensor):  # x: (N, d)
-        s = torch.sigmoid(self.w_r(x))  # router scores
+        # Get raw logits before sigmoid for z-loss computation
+        logits = self.w_r(x)  # (N, num_experts)
+
+        # Router z-loss: penalize large logits to prevent numerical instability
+        # L_z = mean((log sum exp(logits))^2)
+        log_z = torch.logsumexp(logits, dim=-1)
+        router_z_loss = torch.mean(log_z ** 2)
+
+        s = torch.sigmoid(logits)  # router scores
         biased = s + self.bias
         top_val, top_idx = biased.topk(self.k + 1, dim=-1)
         routed_idx = top_idx[:, : self.k]
@@ -168,6 +177,19 @@ class QuantileBalancingRouter(nn.Module):
         routed_raw = torch.gather(s, -1, routed_idx)
         weights = routed_raw / routed_raw.sum(-1, keepdim=True).clamp_min(1e-9)
 
+        # Load balancing loss: encourage uniform expert utilization
+        # Count how many tokens route to each expert
+        expert_usage = torch.zeros(self.num_experts, device=x.device)
+        for e in range(self.num_experts):
+            expert_usage[e] = (routed_idx == e).sum()
+
+        # Normalize to get fraction of tokens per expert
+        expert_frac = expert_usage / (routed_idx.numel() + 1e-9)
+        # Target is uniform: k/num_experts (since k experts active per token)
+        target_frac = self.k / self.num_experts
+        # L2 loss between actual and target distribution
+        load_balance_loss = torch.mean((expert_frac - target_frac) ** 2)
+
         if self.training:
             with torch.no_grad():
                 margins = s - cutoff.unsqueeze(-1)
@@ -175,7 +197,7 @@ class QuantileBalancingRouter(nn.Module):
                 bias_hat = -torch.quantile(margins, q, dim=0)
                 self.bias.copy_(bias_hat - bias_hat.mean())  # takes effect on the next call
 
-        return routed_idx, weights
+        return routed_idx, weights, router_z_loss, load_balance_loss
 
 
 # Shared experts run full-width on every token; routed experts run in a compact latent space,
@@ -203,12 +225,12 @@ class StableLatentMoE(nn.Module):
             ]
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor):
         B, T, d = x.shape
         flat = x.reshape(-1, d)
         z = self.down(flat)
 
-        idx, weights = self.router(flat)  # (N,k), (N,k)
+        idx, weights, router_z_loss, load_balance_loss = self.router(flat)  # (N,k), (N,k), scalar, scalar
         u = flat.new_zeros(flat.shape[0], z.shape[-1])
         for e, expert in enumerate(self.routed_experts):
             hit = idx == e
@@ -220,7 +242,7 @@ class StableLatentMoE(nn.Module):
 
         y = sum(expert(flat) for expert in self.shared_experts)
         y = y + self.up(self.pre_up_norm(u))
-        return y.view(B, T, d)
+        return y.view(B, T, d), router_z_loss, load_balance_loss
 
 
 # Replaces the standard residual stream with an attention pool: a learned per-layer query

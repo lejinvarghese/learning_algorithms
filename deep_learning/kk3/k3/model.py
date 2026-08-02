@@ -5,8 +5,10 @@ from typing import List, Optional
 import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
+from transformers import PreTrainedModel
+from transformers.modeling_outputs import CausalLMOutputWithPast
 
-from .config import K3Config
+from .config import K3Config, K3HFConfig
 from .layers import AttnResGate, GatedMLA, KimiDeltaAttention, RMSNorm, StableLatentMoE
 
 
@@ -37,8 +39,11 @@ class K3Block(nn.Module):
                 )
             )
 
-    def forward(self, block_reps: List[torch.Tensor]) -> torch.Tensor:
+    def forward(self, block_reps: List[torch.Tensor]):
         partial = torch.zeros_like(block_reps[0])
+        total_router_z_loss = 0.0
+        total_load_balance_loss = 0.0
+
         for i, sub in enumerate(self.layers):
             ctx = block_reps + ([partial] if i > 0 else [])
             h = sub["gate"](ctx)
@@ -46,9 +51,15 @@ class K3Block(nn.Module):
                 a = checkpoint(sub["attn"], h, use_reentrant=False) + h
             else:
                 a = sub["attn"](h) + h
-            m = sub["moe"](a) + a
+            m, router_z_loss, load_balance_loss = sub["moe"](a)
+            m = m + a
             partial = partial + m
-        return partial
+
+            # Accumulate auxiliary losses
+            total_router_z_loss = total_router_z_loss + router_z_loss
+            total_load_balance_loss = total_load_balance_loss + load_balance_loss
+
+        return partial, total_router_z_loss, total_load_balance_loss
 
 
 # One extra block-shaped layer that fuses the final hidden state with the next token's
@@ -65,14 +76,15 @@ class MTPHead(nn.Module):
         self.moe = StableLatentMoE(cfg)
         self.norm = RMSNorm(cfg.hidden_dim)
 
-    def forward(self, hidden: torch.Tensor, input_ids: torch.Tensor) -> torch.Tensor:
+    def forward(self, hidden: torch.Tensor, input_ids: torch.Tensor):
         next_emb = torch.zeros_like(hidden)
         next_emb[:, :-1] = self.embed(input_ids)[:, 1:]
         fused = self.fuse(torch.cat([self.fuse_norm_h(hidden), self.fuse_norm_e(next_emb)], dim=-1))
         h = self.gate([fused, hidden])
         a = self.attn(h) + h
-        m = self.moe(a) + a
-        return self.norm(m)
+        m, router_z_loss, load_balance_loss = self.moe(a)
+        m = m + a
+        return self.norm(m), router_z_loss, load_balance_loss
 
 
 def _vit_block(cfg: K3Config) -> nn.TransformerEncoderLayer:
@@ -160,13 +172,33 @@ class K3Model(nn.Module):
             x = x + vis
 
         block_reps = [x]
+        total_router_z_loss = 0.0
+        total_load_balance_loss = 0.0
+
         for block in self.blocks:
-            block_reps.append(block(block_reps))
+            block_out, router_z_loss, load_balance_loss = block(block_reps)
+            block_reps.append(block_out)
+            total_router_z_loss = total_router_z_loss + router_z_loss
+            total_load_balance_loss = total_load_balance_loss + load_balance_loss
 
         h = self.final_norm(block_reps[-1])
         logits = self.lm_head(h)
-        mtp_logits = self.lm_head(self.mtp(h, input_ids)) if self.mtp is not None else None
-        return logits, mtp_logits
+
+        # Handle MTP head if present
+        if self.mtp is not None:
+            mtp_out, mtp_router_z_loss, mtp_load_balance_loss = self.mtp(h, input_ids)
+            mtp_logits = self.lm_head(mtp_out)
+            total_router_z_loss = total_router_z_loss + mtp_router_z_loss
+            total_load_balance_loss = total_load_balance_loss + mtp_load_balance_loss
+        else:
+            mtp_logits = None
+
+        # Return auxiliary losses for training stability
+        aux_losses = {
+            "router_z_loss": total_router_z_loss,
+            "load_balance_loss": total_load_balance_loss,
+        }
+        return logits, mtp_logits, aux_losses
 
     def param_counts(self):
         # Total parameters vs. an approximation of what's active per token once only a
@@ -178,3 +210,49 @@ class K3Model(nn.Module):
         active_frac = self.cfg.num_experts_active / max(1, self.cfg.num_routed_experts)
         activated = total - moe_params + int(moe_params * active_frac)
         return {"total": total, "activated_approx": activated}
+
+
+class K3PreTrainedModel(PreTrainedModel):
+    config_class = K3HFConfig
+    base_model_prefix = "k3"
+    supports_gradient_checkpointing = True
+    _no_split_modules = ["K3Block"]
+
+    def _init_weights(self, _):
+        pass
+
+
+class K3ForCausalLM(K3PreTrainedModel):
+    def __init__(self, config: K3HFConfig):
+        super().__init__(config)
+        k3_cfg = K3Config(
+            vocab_size=config.vocab_size, max_seq_len=config.max_seq_len, hidden_dim=config.hidden_dim,
+            num_blocks=config.num_blocks, layers_per_block=config.layers_per_block,
+            kda_mla_ratio=config.kda_mla_ratio, num_heads=config.num_heads,
+            conv_kernel_size=config.conv_kernel_size, kda_decay_rank=config.kda_decay_rank,
+            kda_gmin=config.kda_gmin, mla_latent_dim=config.mla_latent_dim,
+            latent_moe_ratio=config.latent_moe_ratio, num_routed_experts=config.num_routed_experts,
+            num_experts_active=config.num_experts_active, num_shared_experts=config.num_shared_experts,
+            moe_hidden_per_expert=config.moe_hidden_per_expert, shared_moe_hidden=config.shared_moe_hidden,
+            situglu_beta1=config.situglu_beta1, situglu_beta2=config.situglu_beta2, use_mtp=config.use_mtp,
+            use_vision=config.use_vision, vit_layers=config.vit_layers, vit_hidden=config.vit_hidden,
+            vit_heads=config.vit_heads, vit_patch_size=config.vit_patch_size,
+            vit_mlp_ratio=config.vit_mlp_ratio, vit_num_frames=config.vit_num_frames,
+            vit_temporal_pool=config.vit_temporal_pool, tie_embeddings=config.tie_embeddings,
+            use_gradient_checkpointing=config.use_gradient_checkpointing,
+        )
+        self.model = K3Model(k3_cfg)
+
+    def forward(self, input_ids, images=None, has_visual=None, labels=None, **_):
+        logits, mtp_logits, aux_losses = self.model(input_ids, images, has_visual)
+        loss = None
+        if labels is not None:
+            loss = torch.nn.functional.cross_entropy(
+                logits[:, :-1].reshape(-1, self.config.vocab_size), labels[:, 1:].reshape(-1),
+            )
+            if mtp_logits is not None:
+                loss = loss + 0.1 * torch.nn.functional.cross_entropy(
+                    mtp_logits[:, :-2].reshape(-1, self.config.vocab_size), labels[:, 2:].reshape(-1),
+                )
+            loss = loss + 1e-3 * aux_losses["router_z_loss"] + 1e-2 * aux_losses["load_balance_loss"]
+        return CausalLMOutputWithPast(loss=loss, logits=logits)

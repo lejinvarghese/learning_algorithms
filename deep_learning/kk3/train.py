@@ -2,6 +2,7 @@ import os
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
 import click
+import numpy as np
 import torch
 import torch.nn.functional as F
 from pathlib import Path
@@ -11,7 +12,7 @@ from accelerate.utils import DeepSpeedPlugin
 
 from k3 import K3Config, K3Model
 from k3.eval import evaluate
-from k3.hf_data import HFImageCaptionDataset, HFTextDataset
+from k3.data import HFImageCaptionDataset, HFTextDataset
 
 from optimizer import create_k3_optimizer
 
@@ -32,7 +33,7 @@ def get_datasets(n_train, n_eval, seq_len, frame_size, num_frames):
 
 @click.command()
 @click.option("--epochs", type=int, default=5, show_default=True, help="number of training epochs")
-@click.option("--batch-size", type=int, default=16, show_default=True, help="training batch size")
+@click.option("--batch-size", type=int, default=8, show_default=True, help="training batch size")
 @click.option("--n-train", type=int, default=100_000, show_default=True, help="samples per source, training split")
 @click.option("--n-eval", type=int, default=1_000, show_default=True, help="samples per source, evaluation split")
 def main(epochs, batch_size, n_train, n_eval):
@@ -61,7 +62,7 @@ def main(epochs, batch_size, n_train, n_eval):
     opt = create_k3_optimizer(model, cfg, muon_lr=0.001)
 
     total_steps = len(train_loader) * epochs
-    warmup_steps = int(total_steps * 0.1)
+    warmup_steps = int(total_steps * 0.2)  # 20% warmup for Muon stability
 
     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
         opt, start_factor=1e-10, end_factor=1.0, total_iters=warmup_steps
@@ -84,10 +85,12 @@ def main(epochs, batch_size, n_train, n_eval):
         )
 
     first_loss, global_step = None, 0
+    grad_norm_history = []  # For adaptive gradient clipping
+
     for epoch in range(1, epochs + 1):
         for step, (ids, images, has_visual) in enumerate(train_loader, start=1):
             with accelerator.accumulate(model):
-                logits, mtp_logits = model(ids, images=images, has_visual=has_visual)
+                logits, mtp_logits, aux_losses = model(ids, images=images, has_visual=has_visual)
                 targets = ids.roll(-1, dims=1)
                 loss = F.cross_entropy(logits[:, :-1].reshape(-1, cfg.vocab_size), targets[:, :-1].reshape(-1))
                 if mtp_logits is not None:
@@ -96,8 +99,16 @@ def main(epochs, batch_size, n_train, n_eval):
                         mtp_logits[:, :-2].reshape(-1, cfg.vocab_size), mtp_targets[:, :-2].reshape(-1)
                     )
 
+                # Add auxiliary losses for MoE stability
+                # Router z-loss prevents logit explosion (coefficient 1e-3 from literature)
+                # Load balance loss encourages uniform expert utilization (coefficient 1e-2)
+                loss = loss + 1e-3 * aux_losses["router_z_loss"] + 1e-2 * aux_losses["load_balance_loss"]
+
                 # Check for loss spikes before updating
                 loss_val = loss.item()
+                router_z = aux_losses["router_z_loss"].item()
+                load_bal = aux_losses["load_balance_loss"].item()
+
                 if torch.isnan(loss).any() or torch.isinf(loss).any() or loss_val > 100.0:
                     if accelerator.is_main_process:
                         click.secho(f"⚠ Skipping step {step}: loss spike {loss_val:.2f}", fg="yellow")
@@ -105,7 +116,17 @@ def main(epochs, batch_size, n_train, n_eval):
                     continue
 
                 accelerator.backward(loss)
-                accelerator.clip_grad_norm_(model.parameters(), 0.5)
+
+                # Gradient norm monitoring (before clipping)
+                total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=float("inf"))
+                grad_norm_history.append(total_norm.item())
+                if len(grad_norm_history) > 100:
+                    grad_norm_history.pop(0)
+
+                # Adaptive gradient clipping (95th percentile of recent norms)
+                clip_value = np.percentile(grad_norm_history, 95) if len(grad_norm_history) > 20 else 1.0
+                accelerator.clip_grad_norm_(model.parameters(), max(clip_value, 0.5))  # Min 0.5
+
                 opt.step()
                 scheduler.step()
                 opt.zero_grad()
@@ -113,10 +134,20 @@ def main(epochs, batch_size, n_train, n_eval):
             if accelerator.is_main_process:
                 first_loss = first_loss if first_loss is not None else loss_val
                 global_step += 1
-                click.secho(
-                    f"epoch {epoch}/{epochs} step {step}/{len(train_loader)}: loss={loss_val:.4f}",
-                    fg="green" if loss_val <= first_loss else "red",
-                )
+
+                # Log every 10 steps with gradient norm
+                if step % 10 == 0:
+                    click.secho(
+                        f"epoch {epoch}/{epochs} step {step}/{len(train_loader)}: "
+                        f"loss={loss_val:.4f} grad_norm={total_norm:.2f} clip={clip_value:.2f} "
+                        f"router_z={router_z:.2e} load_bal={load_bal:.2e}",
+                        fg="green" if loss_val <= first_loss else "red",
+                    )
+                else:
+                    click.secho(
+                        f"epoch {epoch}/{epochs} step {step}/{len(train_loader)}: loss={loss_val:.4f}",
+                        fg="green" if loss_val <= first_loss else "red",
+                    )
 
         metrics = evaluate(model, test_loader, cfg.vocab_size, accelerator.device)
         if accelerator.is_main_process:

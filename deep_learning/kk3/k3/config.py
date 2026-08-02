@@ -1,6 +1,7 @@
 # Config for K3: architectural ratios (KDA:MLA mix, expert counts, latent widths) match Kimi
 # K3's shape; absolute sizes scale via K3Config.scaled(mult) to whatever budget you're working with.
 from dataclasses import dataclass
+from transformers import PretrainedConfig
 
 
 @dataclass
@@ -105,3 +106,58 @@ class K3Config:
         )
         cfg.update(overrides)
         return cls(**cfg)
+
+
+class K3HFConfig(PretrainedConfig):
+    model_type = "k3"
+
+    def __init__(self, vocab_size=32000, max_seq_len=1024, hidden_dim=256, num_blocks=4, layers_per_block=4,
+                 kda_mla_ratio=3, num_heads=8, conv_kernel_size=4, kda_decay_rank=8, kda_gmin=-5.0,
+                 mla_latent_dim=128, latent_moe_ratio=0.5, num_routed_experts=32, num_experts_active=4,
+                 num_shared_experts=2, moe_hidden_per_expert=128, shared_moe_hidden=256, situglu_beta1=4.0,
+                 situglu_beta2=25.0, use_mtp=True, use_vision=True, vit_layers=4, vit_hidden=128, vit_heads=4,
+                 vit_patch_size=14, vit_mlp_ratio=4.0, vit_num_frames=8, vit_temporal_pool=2,
+                 tie_embeddings=True, use_gradient_checkpointing=False, **kwargs):
+        super().__init__(**kwargs)
+        self.vocab_size = vocab_size
+        self.max_seq_len = max_seq_len
+        self.hidden_dim = hidden_dim
+        self.num_blocks = num_blocks
+        self.layers_per_block = layers_per_block
+        self.kda_mla_ratio = kda_mla_ratio
+        self.num_heads = num_heads
+        self.conv_kernel_size = conv_kernel_size
+        self.kda_decay_rank = kda_decay_rank
+        self.kda_gmin = kda_gmin
+        self.mla_latent_dim = mla_latent_dim
+        self.latent_moe_ratio = latent_moe_ratio
+        self.num_routed_experts = num_routed_experts
+        self.num_experts_active = num_experts_active
+        self.num_shared_experts = num_shared_experts
+        self.moe_hidden_per_expert = moe_hidden_per_expert
+        self.shared_moe_hidden = shared_moe_hidden
+        self.situglu_beta1 = situglu_beta1
+        self.situglu_beta2 = situglu_beta2
+        self.use_mtp = use_mtp
+        self.use_vision = use_vision
+        self.vit_layers = vit_layers
+        self.vit_hidden = vit_hidden
+        self.vit_heads = vit_heads
+        self.vit_patch_size = vit_patch_size
+        self.vit_mlp_ratio = vit_mlp_ratio
+        self.vit_num_frames = vit_num_frames
+        self.vit_temporal_pool = vit_temporal_pool
+        self.tie_embeddings = tie_embeddings
+        self.use_gradient_checkpointing = use_gradient_checkpointing
+
+    @property
+    def head_dim(self):
+        return self.hidden_dim // self.num_heads
+
+    @property
+    def latent_dim(self):
+        return max(8, int(round(self.hidden_dim * self.latent_moe_ratio)))
+
+    @property
+    def num_layers(self):
+        return self.num_blocks * self.layers_per_block

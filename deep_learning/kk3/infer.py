@@ -88,7 +88,7 @@ def generate(
 
     for i in range(max_new_tokens):
         # Forward pass
-        logits, _ = model(generated, images=images, has_visual=has_visual)
+        logits, _, _ = model(generated, images=images, has_visual=has_visual)
 
         # Sample next token
         next_token_logits = logits[0, prompt_len + i - 1] / temperature

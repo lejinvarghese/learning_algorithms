@@ -13,7 +13,9 @@ def zeropower_via_newtonschulz5(G, steps: int):
     """Newton-Schulz iteration for orthogonalization (from muon library)"""
     assert G.ndim >= 2
     a, b, c = (3.4445, -4.7750, 2.0315)
-    X = G.bfloat16()
+    # Use fp32 for numerical stability (bf16/fp16 causes spurious negative eigenvalues)
+    orig_dtype = G.dtype
+    X = G.float()
     if G.size(-2) > G.size(-1):
         X = X.mT
 
@@ -25,7 +27,7 @@ def zeropower_via_newtonschulz5(G, steps: int):
 
     if G.size(-2) > G.size(-1):
         X = X.mT
-    return X
+    return X.to(orig_dtype)
 
 
 def muon_update(grad, momentum, beta=0.95, ns_steps=5, nesterov=True):
