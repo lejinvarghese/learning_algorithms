@@ -58,7 +58,7 @@ def main(epochs, batch_size, n_train, n_eval):
     )
     test_loader = DataLoader(test_data, batch_size=batch_size, num_workers=4, pin_memory=True)
 
-    opt = create_k3_optimizer(model, cfg, muon_lr=0.002)
+    opt = create_k3_optimizer(model, cfg, muon_lr=0.001)
 
     total_steps = len(train_loader) * epochs
     warmup_steps = int(total_steps * 0.1)
@@ -67,7 +67,7 @@ def main(epochs, batch_size, n_train, n_eval):
         opt, start_factor=1e-10, end_factor=1.0, total_iters=warmup_steps
     )
     cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        opt, T_max=total_steps - warmup_steps, eta_min=0.002 * 0.1
+        opt, T_max=total_steps - warmup_steps, eta_min=0.001 * 0.1
     )
     # Chain them together
     scheduler = torch.optim.lr_scheduler.SequentialLR(
@@ -95,6 +95,13 @@ def main(epochs, batch_size, n_train, n_eval):
                     loss = loss + 0.1 * F.cross_entropy(
                         mtp_logits[:, :-2].reshape(-1, cfg.vocab_size), mtp_targets[:, :-2].reshape(-1)
                     )
+
+                # Check for loss spikes before updating
+                if torch.isnan(loss) or torch.isinf(loss) or loss > 10.0:
+                    if accelerator.is_main_process:
+                        click.secho(f"⚠ Skipping step {step}: loss spike detected", fg="yellow")
+                    opt.zero_grad()
+                    continue
 
                 accelerator.backward(loss)
                 accelerator.clip_grad_norm_(model.parameters(), 0.5)
