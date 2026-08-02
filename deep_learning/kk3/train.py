@@ -39,7 +39,7 @@ def main(epochs, batch_size, n_train, n_eval):
 
     accelerator = Accelerator(
         gradient_accumulation_steps=1,
-        mixed_precision="bf16",
+        mixed_precision="fp16",
         deepspeed_plugin=(
             DeepSpeedPlugin(zero_stage=2, offload_optimizer_device="cpu") if torch.cuda.is_available() else None
         ),
