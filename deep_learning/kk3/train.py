@@ -1,3 +1,6 @@
+import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 import click
 import torch
 import torch.nn.functional as F
@@ -35,7 +38,7 @@ def get_datasets(n_train, n_eval, seq_len, frame_size, num_frames):
 def main(epochs, batch_size, n_train, n_eval):
 
     accelerator = Accelerator(
-        gradient_accumulation_steps=1,
+        gradient_accumulation_steps=2,
         mixed_precision="no",
         deepspeed_plugin=(
             DeepSpeedPlugin(zero_stage=2, offload_optimizer_device="cpu") if torch.cuda.is_available() else None
@@ -48,10 +51,11 @@ def main(epochs, batch_size, n_train, n_eval):
 
     frame_size = cfg.vit_patch_size * 8
     train_data, test_data = get_datasets(
-        n_train=n_train, n_eval=n_eval, seq_len=32, frame_size=frame_size, num_frames=4
+        n_train=n_train, n_eval=n_eval, seq_len=96, frame_size=frame_size, num_frames=4
     )
-    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, drop_last=True,
-                               num_workers=4, pin_memory=True)
+    train_loader = DataLoader(
+        train_data, batch_size=batch_size, shuffle=True, drop_last=True, num_workers=4, pin_memory=True
+    )
     test_loader = DataLoader(test_data, batch_size=batch_size, num_workers=4, pin_memory=True)
 
     opt = create_k3_optimizer(model, cfg, muon_lr=0.005)
