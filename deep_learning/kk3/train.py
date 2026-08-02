@@ -97,9 +97,10 @@ def main(epochs, batch_size, n_train, n_eval):
                     )
 
                 # Check for loss spikes before updating
-                if torch.isnan(loss) or torch.isinf(loss) or loss > 10.0:
+                loss_val = loss.item()
+                if torch.isnan(loss).any() or torch.isinf(loss).any() or loss_val > 10.0:
                     if accelerator.is_main_process:
-                        click.secho(f"⚠ Skipping step {step}: loss spike detected", fg="yellow")
+                        click.secho(f"⚠ Skipping step {step}: loss spike {loss_val:.2f}", fg="yellow")
                     opt.zero_grad()
                     continue
 
@@ -110,7 +111,6 @@ def main(epochs, batch_size, n_train, n_eval):
                 opt.zero_grad()
 
             if accelerator.is_main_process:
-                loss_val = loss.item()
                 first_loss = first_loss if first_loss is not None else loss_val
                 global_step += 1
                 click.secho(
