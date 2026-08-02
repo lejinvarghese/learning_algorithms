@@ -32,7 +32,7 @@ def get_datasets(n_train, n_eval, seq_len, frame_size, num_frames):
 
 @click.command()
 @click.option("--epochs", type=int, default=5, show_default=True, help="number of training epochs")
-@click.option("--batch-size", type=int, default=32, show_default=True, help="training batch size")
+@click.option("--batch-size", type=int, default=16, show_default=True, help="training batch size")
 @click.option("--n-train", type=int, default=100_000, show_default=True, help="samples per source, training split")
 @click.option("--n-eval", type=int, default=1_000, show_default=True, help="samples per source, evaluation split")
 def main(epochs, batch_size, n_train, n_eval):
