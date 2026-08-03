@@ -7,7 +7,7 @@ from transformers import PretrainedConfig
 @dataclass
 class K3Config:
     # --- token / sequence ---
-    vocab_size: int = 32_000  # Kimi K3: 160_000 (shrunk for a toy tokenizer)
+    vocab_size: int = 163_840  # Kimi K3: 163,840 (tiktoken BPE)
     max_seq_len: int = 1024  # Kimi K3: extends up to 1M tokens via progressive training
 
     # --- backbone width/depth (Kimi K3: hidden=7168, 93 layers, 8 attention-residual blocks) ---
@@ -111,7 +111,7 @@ class K3Config:
 class K3HFConfig(PretrainedConfig):
     model_type = "k3"
 
-    def __init__(self, vocab_size=32000, max_seq_len=1024, hidden_dim=256, num_blocks=4, layers_per_block=4,
+    def __init__(self, vocab_size=163840, max_seq_len=1024, hidden_dim=256, num_blocks=4, layers_per_block=4,
                  kda_mla_ratio=3, num_heads=8, conv_kernel_size=4, kda_decay_rank=8, kda_gmin=-5.0,
                  mla_latent_dim=128, latent_moe_ratio=0.5, num_routed_experts=32, num_experts_active=4,
                  num_shared_experts=2, moe_hidden_per_expert=128, shared_moe_hidden=256, situglu_beta1=4.0,

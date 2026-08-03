@@ -62,6 +62,30 @@ Audio support requires implementing an audio encoder to process the audioset con
 and `k3/video.py`'s four small cached real video clips — no network dependency, useful for a
 quick sanity check or CI.
 
+## Pretrained Initialization
+
+Instead of training from scratch, initialize K3 from pretrained foundation models:
+
+```bash
+# Transfer weights from SmolLM2-360M (language) + SigLIP (vision)
+uv run python -m base.transfer_weights \
+    --source smollm2-360m \
+    --vision siglip-so400m \
+    --output checkpoints/k3_init.pt
+
+# Then train from this checkpoint
+python train.py --resume checkpoints/k3_init.pt
+```
+
+**What gets transferred:**
+- ✅ Embeddings (BPE→BPE, vocab adapted 50K→164K)
+- ✅ Layer norms
+- ✅ MoE experts (cloned from dense FFNs with noise)
+- ✅ Vision encoder (SigLIP→MoonViT)
+- ❌ Attention (left random - KDA/MLA incompatible with standard attention)
+
+Expected benefits: 2-5x faster convergence and better final performance. Based on research-proven "MoE upcycling" and heterogeneous weight transfer. See `base/README.md` for details and research precedent.
+
 ## Run
 
 ```bash
@@ -75,8 +99,8 @@ python train.py --epochs 10 --n-train 50000  # combine options
 ```
 
 **Available options:**
-- `--epochs`: Number of training epochs (default: 5)
-- `--batch-size`: Training batch size (default: 16)
+- `--epochs`: Number of training epochs (default: 2)
+- `--batch-size`: Training batch size (default: 12)
 - `--n-train`: Training samples per modality (default: 100,000)
 - `--n-eval`: Evaluation samples per modality (default: 1,000)
 
@@ -85,10 +109,11 @@ python train.py --epochs 10 --n-train 50000  # combine options
 - Learning rate: 0.001 with 20% warmup, cosine decay to 10%
 - Adaptive gradient clipping (95th percentile, min 0.5)
 - MoE auxiliary losses: router z-loss (1e-3) + load balancing (1e-2)
-- Loss spike detection: skip batches with NaN/Inf/loss>100
-- DeepSpeed ZeRO-2 with CPU offload (auto-enabled on CUDA)
+- Loss spike detection: skip batches with NaN/Inf/loss>5000
+- DataLoader: 12 workers, prefetch_factor=8, persistent workers
 - Gradient checkpointing enabled
 - No mixed precision (fp32 for Newton-Schulz stability)
+- No DeepSpeed (removed - adds overhead for small models)
 
 Training runs via [Accelerate](https://huggingface.co/docs/accelerate). Checkpoints saved to 
 `checkpoints/k3_epoch{N}.pt` after each epoch with model weights, optimizer state, config, and metrics.
@@ -110,8 +135,8 @@ python infer.py --checkpoint checkpoints/k3_epoch1.pt --text "once upon a time" 
 - `--temperature`: Sampling temperature (default: 0.8)
 - `--device`: Device override (auto-detects if not specified)
 
-The model generates byte-level UTF-8 sequences. For image captioning, vision embeddings condition 
-the generation as continuous features (not discrete tokens).
+The model uses Kimi K3's tiktoken-based BPE tokenizer (163,840 tokens). For image captioning, vision 
+embeddings condition the generation as continuous features (not discrete tokens).
 
 ## Publish to HuggingFace
 

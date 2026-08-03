@@ -1,14 +1,41 @@
+import contextlib
+import io
+import logging
 import numpy as np
+import os
 import torch
 import torch.nn.functional as F
 from datasets import Dataset as HFDataset, load_dataset
 from torch.utils.data import Dataset
+import warnings
+
+# Suppress transformers verbosity
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+logging.getLogger("transformers").setLevel(logging.ERROR)
+warnings.filterwarnings("ignore")
+
+from .tokenizer import get_k3_tokenizer
+
+# Global tokenizer instance - lazily initialized per process/worker
+_tokenizer = None
+
+
+def _get_tokenizer():
+    """Lazy tokenizer initialization for multi-process safety."""
+    global _tokenizer
+    if _tokenizer is None:
+        _tokenizer = get_k3_tokenizer()
+    return _tokenizer
 
 
 def _encode(caption: str, seq_len: int) -> torch.Tensor:
-    raw = caption.encode("utf-8")[:seq_len]
+    """Encode text using K3 tokenizer (suppress verbose output)."""
+    tokenizer = _get_tokenizer()
+    # Redirect stdout/stderr to suppress tokenizer debug prints
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        tokens = tokenizer.encode(caption, add_special_tokens=False)[:seq_len]
     ids = torch.zeros(seq_len, dtype=torch.long)
-    ids[: len(raw)] = torch.tensor(list(raw), dtype=torch.long)
+    ids[:len(tokens)] = torch.tensor(tokens, dtype=torch.long)
     return ids
 
 
@@ -24,7 +51,13 @@ class HFTextDataset(Dataset):
         split_name = {"train": "train", "val": "valid", "test": "test"}[split]
         ds = load_dataset("lv12/MultiModalDataset", "fineweb", split=split_name)
         assert isinstance(ds, HFDataset), f"Expected Dataset, got {type(ds)}"
-        self.ds: HFDataset = ds.select(range(min(n_samples, len(ds))))
+
+        # Limit to available data
+        actual_samples = min(n_samples, len(ds))
+        if actual_samples < n_samples:
+            print(f"⚠ HFTextDataset: requested {n_samples} samples, only {len(ds)} available (using {actual_samples})")
+
+        self.ds: HFDataset = ds.select(range(actual_samples))
         self.seq_len, self.frame_size, self.num_frames = seq_len, frame_size, num_frames
 
     def __len__(self) -> int:
@@ -48,7 +81,13 @@ class HFImageCaptionDataset(Dataset):
         split_name = {"train": "train", "val": "valid", "test": "test"}[split]
         ds = load_dataset("lv12/MultiModalDataset", "coco", split=split_name)
         assert isinstance(ds, HFDataset), f"Expected Dataset, got {type(ds)}"
-        self.ds: HFDataset = ds.select(range(min(n_samples, len(ds))))
+
+        # Limit to available data
+        actual_samples = min(n_samples, len(ds))
+        if actual_samples < n_samples:
+            print(f"⚠ HFImageCaptionDataset: requested {n_samples} samples, only {len(ds)} available (using {actual_samples})")
+
+        self.ds: HFDataset = ds.select(range(actual_samples))
         self.seq_len, self.frame_size, self.num_frames = seq_len, frame_size, num_frames
 
     def __len__(self) -> int:

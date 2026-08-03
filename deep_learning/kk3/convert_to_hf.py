@@ -3,7 +3,7 @@ import click
 from transformers import AutoConfig, AutoModelForCausalLM
 from k3.config import K3HFConfig
 from k3.model import K3ForCausalLM
-from k3.tokenizer import ByteLevelTokenizer
+from k3.tokenizer import get_k3_tokenizer
 
 AutoConfig.register("k3", K3HFConfig)
 AutoModelForCausalLM.register(K3HFConfig, K3ForCausalLM)
@@ -41,7 +41,7 @@ def main(checkpoint, output):
     model.save_pretrained(output, safe_serialization=False)
     hf_config.save_pretrained(output)
 
-    tokenizer = ByteLevelTokenizer()
+    tokenizer = get_k3_tokenizer()
     tokenizer.save_pretrained(output)
 
     print(f"✓ Saved to {output}/")

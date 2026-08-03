@@ -158,10 +158,12 @@ class QuantileBalancingRouter(nn.Module):
         self.register_buffer("bias", torch.zeros(num_experts))
         self.k = k
         self.num_experts = num_experts
+        # Temperature scaling to prevent logit explosion
+        self.temperature = (dim ** 0.5)
 
     def forward(self, x: torch.Tensor):  # x: (N, d)
-        # Get raw logits before sigmoid for z-loss computation
-        logits = self.w_r(x)  # (N, num_experts)
+        # Get raw logits with temperature scaling
+        logits = self.w_r(x) / self.temperature  # (N, num_experts) - scaled by sqrt(dim)
 
         # Router z-loss: penalize large logits to prevent numerical instability
         # L_z = mean((log sum exp(logits))^2)

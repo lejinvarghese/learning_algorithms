@@ -17,6 +17,7 @@ from PIL import Image
 import numpy as np
 
 from k3 import K3Model
+from k3.tokenizer import get_k3_tokenizer
 
 
 def load_checkpoint(ckpt_path: str, device: str):
@@ -27,33 +28,36 @@ def load_checkpoint(ckpt_path: str, device: str):
     model = K3Model(cfg).to(device)
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
+
+    # Load tokenizer
+    tokenizer = get_k3_tokenizer()
+
     click.secho(f"Loaded checkpoint from epoch {ckpt['epoch']}", fg="green")
     click.secho(
         f"Eval metrics: loss={ckpt['eval_metrics']['loss']:.4f}, " f"accuracy={ckpt['eval_metrics']['accuracy']:.2%}",
         fg="cyan",
     )
-    return model, cfg
+    return model, cfg, tokenizer
 
 
-def encode_text(text: str, seq_len: int = 128) -> torch.Tensor:
-    """Encode text as UTF-8 bytes."""
-    raw = text.encode("utf-8")[:seq_len]
+def encode_text(text: str, tokenizer, seq_len: int = 128) -> torch.Tensor:
+    """Encode text using K3 tokenizer."""
+    tokens = tokenizer.encode(text, add_special_tokens=False)[:seq_len]
     ids = torch.zeros(seq_len, dtype=torch.long)
-    ids[: len(raw)] = torch.tensor(list(raw), dtype=torch.long)
+    ids[:len(tokens)] = torch.tensor(tokens, dtype=torch.long)
     return ids
 
 
-def decode_text(ids: torch.Tensor) -> str:
-    """Decode UTF-8 bytes back to text."""
-    # Stop at first zero (padding)
+def decode_text(ids: torch.Tensor, tokenizer) -> str:
+    """Decode tokens using K3 tokenizer."""
+    # Stop at first zero (padding) or special tokens
     ids = ids.cpu().numpy()
+    # Remove padding
     end = np.where(ids == 0)[0]
     if len(end) > 0:
-        ids = ids[: end[0]]
-    try:
-        return bytes(ids).decode("utf-8", errors="ignore")
-    except:
-        return "[decode error]"
+        ids = ids[:end[0]]
+
+    return tokenizer.decode(ids.tolist(), skip_special_tokens=True)
 
 
 def load_image(image_path: str, size: int = 112, num_frames: int = 4) -> torch.Tensor:
@@ -70,6 +74,7 @@ def load_image(image_path: str, size: int = 112, num_frames: int = 4) -> torch.T
 def generate(
     model,
     cfg,
+    tokenizer,
     prompt_ids: torch.Tensor,
     images: torch.Tensor = None,
     max_new_tokens: int = 64,
@@ -95,8 +100,10 @@ def generate(
         probs = F.softmax(next_token_logits, dim=-1)
         next_token = torch.multinomial(probs, 1).item()
 
-        # Stop at padding or invalid tokens
+        # Stop at padding, invalid tokens, or EOS
         if next_token == 0 or next_token >= cfg.vocab_size:
+            break
+        if next_token == tokenizer.eos_token_id:
             break
 
         # Add to sequence
@@ -127,8 +134,8 @@ def main(checkpoint, text, image, max_tokens, temperature, device):
 
     click.secho(f"Using device: {device}", fg="cyan")
 
-    # Load model
-    model, cfg = load_checkpoint(checkpoint, device)
+    # Load model and tokenizer
+    model, cfg, tokenizer = load_checkpoint(checkpoint, device)
 
     # Prepare inputs
     if image:
@@ -138,24 +145,24 @@ def main(checkpoint, text, image, max_tokens, temperature, device):
 
         # Start with empty or a prompt like "a photo of"
         prompt = text if text else ""
-        prompt_ids = encode_text(prompt, seq_len=128)
+        prompt_ids = encode_text(prompt, tokenizer, seq_len=128)
 
         click.secho(f"Prompt: '{prompt}'", fg="cyan")
     else:
         # Text completion mode
         click.secho(f"\n📝 Text completion", fg="yellow")
         images = None
-        prompt_ids = encode_text(text, seq_len=128)
+        prompt_ids = encode_text(text, tokenizer, seq_len=128)
         click.secho(f"Prompt: '{text}'", fg="cyan")
 
     # Generate
     click.secho("Generating...", fg="yellow")
     output_ids = generate(
-        model, cfg, prompt_ids, images, max_new_tokens=max_tokens, temperature=temperature, device=device
+        model, cfg, tokenizer, prompt_ids, images, max_new_tokens=max_tokens, temperature=temperature, device=device
     )
 
     # Decode and display
-    output_text = decode_text(output_ids)
+    output_text = decode_text(output_ids, tokenizer)
     click.secho(f"\n✨ Generated:", fg="green", bold=True)
     click.secho(output_text, fg="white")
 

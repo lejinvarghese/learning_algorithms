@@ -1,33 +1,14 @@
-from transformers import PreTrainedTokenizer
+"""Kimi K3 tokenizer wrapper."""
+from transformers import AutoTokenizer
 
 
-class ByteLevelTokenizer(PreTrainedTokenizer):
-    model_input_names = ["input_ids"]
+def get_k3_tokenizer():
+    """
+    Get the official Kimi K3 tokenizer.
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    @property
-    def vocab_size(self):
-        return 256
-
-    def get_vocab(self):
-        return {chr(i): i for i in range(256)}
-
-    def _tokenize(self, text, **kwargs):
-        return [chr(b) for b in text.encode("utf-8")]
-
-    def _convert_token_to_id(self, token):
-        return ord(token) if len(token) == 1 else 0
-
-    def _convert_id_to_token(self, index):
-        return chr(index)
-
-    def convert_tokens_to_string(self, tokens):
-        try:
-            return "".join(tokens).encode("latin1").decode("utf-8", errors="replace")
-        except:
-            return "".join(tokens)
-
-    def save_vocabulary(self, save_directory, filename_prefix=None):
-        return tuple()
+    Uses tiktoken-based BPE with 163,840 tokens:
+    - 163,328 merges
+    - 256 single-byte tokens
+    - Special tokens: [BOS], [EOS], [UNK], [PAD]
+    """
+    return AutoTokenizer.from_pretrained("moonshotai/Kimi-K3", trust_remote_code=True)
