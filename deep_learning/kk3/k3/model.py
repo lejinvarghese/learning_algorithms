@@ -155,6 +155,10 @@ class K3Model(nn.Module):
 
         self.mtp = MTPHead(cfg, self.embed) if cfg.use_mtp else None
         self.vision = MoonViT(cfg) if cfg.use_vision else None
+        self.audio = None
+        if cfg.use_audio:
+            from k3.audio import K3AudioEncoder
+            self.audio = K3AudioEncoder(cfg)
 
         nn.init.normal_(self.embed.weight, mean=0.0, std=0.02)
 
@@ -163,13 +167,24 @@ class K3Model(nn.Module):
         input_ids: torch.Tensor,
         images: Optional[torch.Tensor] = None,
         has_visual: Optional[torch.Tensor] = None,
+        audio_mel: Optional[torch.Tensor] = None,
+        has_audio: Optional[torch.Tensor] = None,
     ):
         x = self.embed_norm(self.embed(input_ids))
+
+        # Add vision features
         if images is not None and self.vision is not None:
             vis = self.vision(images).mean(1, keepdim=True)
             if has_visual is not None:
                 vis = vis * has_visual.view(-1, 1, 1)
             x = x + vis
+
+        # Add audio features
+        if audio_mel is not None and self.audio is not None:
+            aud = self.audio(audio_mel).mean(1, keepdim=True)
+            if has_audio is not None:
+                aud = aud * has_audio.view(-1, 1, 1)
+            x = x + aud
 
         block_reps = [x]
         total_router_z_loss = 0.0

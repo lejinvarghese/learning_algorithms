@@ -1,4 +1,5 @@
 import os
+
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
 import click
@@ -16,8 +17,7 @@ from k3.data import HFImageCaptionDataset, HFTextDataset
 from optimizer import create_k3_optimizer
 
 
-def get_datasets(n_train, n_eval, seq_len, frame_size, num_frames):
-
+def get_datasets(n_train, n_eval, seq_len, frame_size, num_frames, use_audio=False):
     train_sets = [
         HFTextDataset("train", n_train, seq_len, frame_size, num_frames),
         HFImageCaptionDataset("train", n_train, seq_len, frame_size, num_frames),
@@ -27,24 +27,40 @@ def get_datasets(n_train, n_eval, seq_len, frame_size, num_frames):
         HFImageCaptionDataset("val", n_eval, seq_len, frame_size, num_frames),
     ]
 
+    # Add audio dataset if enabled (smaller audio length to save memory)
+    if use_audio:
+        from k3.audio_data import HFAudioDataset
+        # Pass num_frames and frame_size to match vision dataset tensor shapes
+        train_sets.append(HFAudioDataset("train", n_train, seq_len, max_audio_len=1500,
+                                         num_frames=num_frames, frame_size=frame_size))
+        test_sets.append(HFAudioDataset("val", n_eval, seq_len, max_audio_len=1500,
+                                        num_frames=num_frames, frame_size=frame_size))
+
     return ConcatDataset(train_sets), ConcatDataset(test_sets)
 
 
 @click.command()
 @click.option("--epochs", type=int, default=2, show_default=True, help="number of training epochs")
-@click.option("--batch-size", type=int, default=12, show_default=True, help="training batch size")
-@click.option("--n-train", type=int, default=100_000, show_default=True, help="samples per source, training split")
-@click.option("--n-eval", type=int, default=1_000, show_default=True, help="samples per source, evaluation split")
+@click.option("--batch-size", type=int, default=8, show_default=True, help="training batch size")
+@click.option("--n-train", type=int, default=10_000, show_default=True, help="samples per source, training split (reduced for memory)")
+@click.option("--n-eval", type=int, default=100, show_default=True, help="samples per source, evaluation split (small - eval only uses first 10 batches)")
 @click.option("--resume", type=click.Path(exists=True), default=None, help="resume from checkpoint")
 @click.option("--adam", is_flag=True, help="use Adam instead of Muon (10-20x faster optimizer)")
-@click.option("--active-experts", type=int, default=4, help="number of active experts (default: 4, balanced for 6GB GPU)")
-def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts):
+@click.option(
+    "--active-experts", type=int, default=4, help="number of active experts (3.1% activation rate, closer to paper)"
+)
+@click.option(
+    "--total-experts", type=int, default=128, help="total number of routed experts (higher capacity, paper uses 896)"
+)
+@click.option(
+    "--use-audio", is_flag=True, help="enable audio encoder and load audio dataset"
+)
+def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts, total_experts, use_audio):
 
-    # Removed DeepSpeed - adds overhead for small models, CPU offloading slows down optimizer steps
     accelerator = Accelerator(
         gradient_accumulation_steps=1,
         mixed_precision="no",  # fp32 required for Muon's Newton-Schulz stability
-        log_with="wandb",  # Built-in wandb integration
+        log_with="wandb",
     )
 
     # Load from checkpoint or create new
@@ -61,18 +77,20 @@ def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts):
         if accelerator.is_main_process:
             click.secho(f"Resumed from epoch {ckpt.get('epoch', 0)}", fg="green")
     else:
-        # Sparse config: 70M total, ~50M active with 4 experts (3→4 for better GPU util without OOM)
+        # Sparse expert config matching paper's design: many experts, few active
+        # 128 experts @ 3.1% activation (4/128) - closer to paper's 2.0% (18/896)
         cfg = K3Config(
             vocab_size=163840,
             hidden_dim=192,
             num_blocks=4,
             layers_per_block=4,
-            num_routed_experts=128,
+            num_routed_experts=total_experts,
             num_experts_active=active_experts,
-            num_shared_experts=1,
+            num_shared_experts=2,
             moe_hidden_per_expert=48,
             shared_moe_hidden=96,
             use_vision=True,
+            use_audio=use_audio,  # Enable audio if flag set
             use_gradient_checkpointing=True,
             vit_num_frames=4,
         )
@@ -82,23 +100,28 @@ def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts):
 
     frame_size = cfg.vit_patch_size * 8
     train_data, test_data = get_datasets(
-        n_train=n_train, n_eval=n_eval, seq_len=64, frame_size=frame_size, num_frames=4
+        n_train=n_train, n_eval=n_eval, seq_len=64, frame_size=frame_size, num_frames=4, use_audio=use_audio
     )
     train_loader = DataLoader(
-        train_data, batch_size=batch_size, shuffle=True, drop_last=True,
-        num_workers=12, pin_memory=True, prefetch_factor=8, persistent_workers=True
+        train_data,
+        batch_size=batch_size,
+        shuffle=True,
+        drop_last=True,
+        num_workers=12,
+        pin_memory=True,
+        prefetch_factor=8,
+        persistent_workers=True,
     )
-    test_loader = DataLoader(test_data, batch_size=batch_size, num_workers=12, pin_memory=True, prefetch_factor=8)
+    test_loader = DataLoader(test_data, batch_size=batch_size, num_workers=4, pin_memory=True, prefetch_factor=2)
 
     # Choose optimizer
     if adam:
         # Fused AdamW: CUDA-optimized, 2-3× faster than standard
-        # LR at 8e-4: sweet spot between stability (5e-4 too slow) and spikes (1e-3 too high)
         opt = torch.optim.AdamW(
             model.parameters(),
-            lr=8e-4,
+            lr=1.5e-4,  # MoE-tuned: >2e-4 causes plateau, 1.5e-4 is sweet spot
             betas=(0.9, 0.95),
-            weight_decay=0.1,
+            weight_decay=0.01,  # Reduced from 0.1 - less regularization for sparse models
             fused=torch.cuda.is_available(),  # Use fused kernels on CUDA
         )
         if accelerator.is_main_process:
@@ -109,13 +132,13 @@ def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts):
             click.secho("Using K3 optimizer (Muon - slow but high quality)", fg="yellow")
 
     total_steps = len(train_loader) * epochs
-    warmup_steps = int(total_steps * 0.3)  # 30% warmup for MoE router stability
+    warmup_steps = int(total_steps * 0.3)  # 30% warmup - MoE needs gentle ramp with low peak LR
 
     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
         opt, start_factor=1e-10, end_factor=1.0, total_iters=warmup_steps
     )
     cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        opt, T_max=total_steps - warmup_steps, eta_min=8e-4 * 0.1  # 10% of peak LR
+        opt, T_max=total_steps - warmup_steps, eta_min=1.5e-4 * 0.1  # 10% of peak LR
     )
     # Chain them together
     scheduler = torch.optim.lr_scheduler.SequentialLR(
@@ -135,16 +158,16 @@ def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts):
         project_name="k3-training",
         config={
             "model": "K3",
-            "total_params": counts['total'],
-            "active_params": counts['activated_approx'],
+            "total_params": counts["total"],
+            "active_params": counts["activated_approx"],
             "vocab_size": cfg.vocab_size,
             "num_experts": cfg.num_routed_experts,
             "active_experts": cfg.num_experts_active,
             "batch_size": batch_size,
             "optimizer": "AdamW" if adam else "K3-Muon",
-            "learning_rate": 1e-3,
+            "learning_rate": 1.5e-4 if adam else 1e-3,
             "epochs": epochs,
-        }
+        },
     )
 
     if accelerator.is_main_process:
@@ -154,13 +177,17 @@ def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts):
             fg="cyan",
         )
 
-    first_loss, global_step = None, 0
+    first_loss = None
+    global_step = 0
     grad_norm_history = []  # For adaptive gradient clipping
 
     for epoch in range(start_epoch, epochs + 1):
-        for step, (ids, images, has_visual) in enumerate(train_loader, start=1):
+        for step, (ids, images, has_visual, audio_mel, has_audio) in enumerate(train_loader, start=1):
+            global_step += 1
             with accelerator.accumulate(model):
-                logits, mtp_logits, aux_losses = model(ids, images=images, has_visual=has_visual)
+                logits, mtp_logits, aux_losses = model(
+                    ids, images=images, has_visual=has_visual, audio_mel=audio_mel, has_audio=has_audio
+                )
                 targets = ids.roll(-1, dims=1)
                 loss = F.cross_entropy(logits[:, :-1].reshape(-1, cfg.vocab_size), targets[:, :-1].reshape(-1))
                 if mtp_logits is not None:
@@ -170,8 +197,8 @@ def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts):
                     )
 
                 # Add auxiliary losses for MoE stability
-                # Router z-loss: increased from 1e-3 to 1e-2 to combat logit explosion
-                loss = loss + 1e-2 * aux_losses["router_z_loss"] + 1e-2 * aux_losses["load_balance_loss"]
+                # Reduced coefficients: 1e-2 was too constraining, causing routing collapse
+                loss = loss + 1e-3 * aux_losses["router_z_loss"] + 1e-3 * aux_losses["load_balance_loss"]
 
                 # Check for loss spikes
                 loss_val = loss.item()
@@ -197,65 +224,65 @@ def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts):
                 opt.zero_grad()
 
             if accelerator.is_main_process:
-                first_loss = first_loss if first_loss is not None else loss_val
-                global_step += 1
+                if first_loss is None:
+                    first_loss = loss_val
 
-                # Log to wandb
-                accelerator.log({
-                    "train/loss": loss_val,
-                    "train/grad_norm": total_norm.item(),
-                    "train/grad_clip": clip_value,
-                    "train/router_z_loss": aux_losses["router_z_loss"].item(),
-                    "train/load_balance_loss": aux_losses["load_balance_loss"].item(),
-                    "train/learning_rate": scheduler.get_last_lr()[0],
-                }, step=global_step)
+                # Log to wandb (no modality separation - user found it not useful)
+                accelerator.log(
+                    {
+                        "train/loss": loss_val,
+                        "train/grad_norm": total_norm.item(),
+                        "train/grad_clip": clip_value,
+                        "train/router_z_loss": aux_losses["router_z_loss"].item(),
+                        "train/load_balance_loss": aux_losses["load_balance_loss"].item(),
+                        "train/learning_rate": scheduler.get_last_lr()[0],
+                    },
+                    step=global_step,
+                )
 
-                # Console log every 10 steps
-                if step % 10 == 0:
-                    router_z = aux_losses["router_z_loss"].item()
-                    load_bal = aux_losses["load_balance_loss"].item()
+                # Simple console logging
+                click.secho(
+                    f"[step {global_step}] epoch {epoch}/{epochs} step {step}/{len(train_loader)}: loss={loss_val:.4f}",
+                    fg="green" if loss_val <= first_loss else "red",
+                )
+
+            # Evaluate every 20 steps (frequent checks, limited batches to save memory)
+            if global_step % 20 == 0:
+                metrics = evaluate(model, test_loader, cfg.vocab_size, accelerator.device, max_batches=10)
+                if accelerator.is_main_process:
+                    accelerator.log({
+                        "eval/loss": metrics['loss'],
+                        "eval/accuracy": metrics['accuracy'],
+                    }, step=global_step)
                     click.secho(
-                        f"epoch {epoch}/{epochs} step {step}/{len(train_loader)}: "
-                        f"loss={loss_val:.4f} grad_norm={total_norm:.2f} clip={clip_value:.2f} "
-                        f"router_z={router_z:.2e} load_bal={load_bal:.2e}",
-                        fg="green" if loss_val <= first_loss else "red",
+                        f"[step {global_step}] eval: loss={metrics['loss']:.4f} accuracy={metrics['accuracy']:.2%}",
+                        fg="blue",
                     )
-                else:
-                    click.secho(
-                        f"epoch {epoch}/{epochs} step {step}/{len(train_loader)}: loss={loss_val:.4f}",
-                        fg="green" if loss_val <= first_loss else "red",
-                    )
+                # Clear CUDA cache after eval
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
-        metrics = evaluate(model, test_loader, cfg.vocab_size, accelerator.device)
+            # Save checkpoint every 100 steps
+            if global_step % 100 == 0 and accelerator.is_main_process:
+                ckpt_dir = Path("checkpoints")
+                ckpt_dir.mkdir(exist_ok=True)
+                ckpt_path = ckpt_dir / f"k3_step{global_step}.pt"
+                unwrapped_model = accelerator.unwrap_model(model)
+                torch.save(
+                    {
+                        "epoch": epoch,
+                        "global_step": global_step,
+                        "model_state_dict": unwrapped_model.state_dict(),
+                        "optimizer_state_dict": opt.state_dict(),
+                        "config": cfg,
+                    },
+                    ckpt_path,
+                )
+                click.secho(f"💾 Checkpoint saved: {ckpt_path}", fg="magenta")
+
+        # End of epoch - just log it
         if accelerator.is_main_process:
-            # Log eval metrics
-            accelerator.log({
-                "eval/loss": metrics['loss'],
-                "eval/accuracy": metrics['accuracy'],
-                "epoch": epoch,
-            }, step=global_step)
-
-            click.secho(
-                f"epoch {epoch}/{epochs} eval: loss={metrics['loss']:.4f} accuracy={metrics['accuracy']:.2%}",
-                fg="blue",
-            )
-
-            # Save checkpoint
-            ckpt_dir = Path("checkpoints")
-            ckpt_dir.mkdir(exist_ok=True)
-            ckpt_path = ckpt_dir / f"k3_epoch{epoch}.pt"
-            unwrapped_model = accelerator.unwrap_model(model)
-            torch.save(
-                {
-                    "epoch": epoch,
-                    "model_state_dict": unwrapped_model.state_dict(),
-                    "optimizer_state_dict": opt.state_dict(),
-                    "config": cfg,
-                    "eval_metrics": metrics,
-                },
-                ckpt_path,
-            )
-            click.secho(f"Saved checkpoint: {ckpt_path}", fg="magenta")
+            click.secho(f"✓ Epoch {epoch}/{epochs} complete", fg="cyan")
 
     if accelerator.is_main_process and accelerator.device.type == "cuda":
         click.secho(f"peak CUDA memory: {torch.cuda.max_memory_allocated() / 1e9:.2f} GB", fg="magenta")

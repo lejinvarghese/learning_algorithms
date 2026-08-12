@@ -60,13 +60,19 @@ class HFTextDataset(Dataset):
         self.ds: HFDataset = ds.select(range(actual_samples))
         self.seq_len, self.frame_size, self.num_frames = seq_len, frame_size, num_frames
 
+        # Cache dummy tensors to avoid recreating on every __getitem__
+        self._dummy_frames = torch.zeros(num_frames, 3, frame_size, frame_size)
+        self._dummy_audio = torch.zeros(80, 1500)  # Match audio dataset max_audio_len
+        self._has_visual = torch.tensor(0.0)
+        self._has_audio = torch.tensor(0.0)
+
     def __len__(self) -> int:
         return len(self.ds)
 
     def __getitem__(self, idx: int):
         ids = _encode(self.ds[idx]["text"], self.seq_len)
-        frames = torch.zeros(self.num_frames, 3, self.frame_size, self.frame_size)
-        return ids, frames, torch.tensor(0.0)
+        # Return format: (ids, images, has_visual, audio_mel, has_audio)
+        return ids, self._dummy_frames, self._has_visual, self._dummy_audio, self._has_audio
 
 
 class HFImageCaptionDataset(Dataset):
@@ -90,6 +96,10 @@ class HFImageCaptionDataset(Dataset):
         self.ds: HFDataset = ds.select(range(actual_samples))
         self.seq_len, self.frame_size, self.num_frames = seq_len, frame_size, num_frames
 
+        # Cache dummy tensors to avoid recreating on every __getitem__
+        self._dummy_audio = torch.zeros(80, 1500)  # Match audio dataset max_audio_len
+        self._has_audio = torch.tensor(0.0)
+
     def __len__(self) -> int:
         return len(self.ds)
 
@@ -100,7 +110,8 @@ class HFImageCaptionDataset(Dataset):
         img = torch.from_numpy(np.array(row["image"].convert("RGB"))).permute(2, 0, 1).float() / 255.0
         img = F.interpolate(img.unsqueeze(0), size=(self.frame_size, self.frame_size), mode="bilinear")
         frames = img.repeat(self.num_frames, 1, 1, 1)
-        return ids, frames, torch.tensor(1.0)
+        # Return format: (ids, images, has_visual, audio_mel, has_audio)
+        return ids, frames, torch.tensor(1.0), self._dummy_audio, self._has_audio
 
 
 class HFVideoCaptionDataset(Dataset):

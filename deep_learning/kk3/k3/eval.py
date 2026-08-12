@@ -6,19 +6,36 @@ from torch.utils.data import DataLoader
 
 
 @torch.no_grad()
-def evaluate(model, loader: DataLoader, vocab_size: int, device: str) -> dict:
+def evaluate(model, loader: DataLoader, vocab_size: int, device: str, max_batches: int = 10) -> dict:
+    """
+    Efficient evaluation - only processes max_batches to save memory.
+    Full dataset eval would OOM with audio (1500 samples × 120k floats each).
+    """
     model.eval()
     total_loss, total_tokens, correct = 0.0, 0, 0
-    for ids, images, has_visual in loader:
-        ids, images, has_visual = ids.to(device), images.to(device), has_visual.to(device)
 
-        logits, _, _ = model(ids, images=images, has_visual=has_visual)
+    for batch_idx, (ids, images, has_visual, audio_mel, has_audio) in enumerate(loader):
+        if batch_idx >= max_batches:
+            break
+
+        ids = ids.to(device)
+        images = images.to(device)
+        has_visual = has_visual.to(device)
+        audio_mel = audio_mel.to(device)
+        has_audio = has_audio.to(device)
+
+        logits, _, _ = model(ids, images=images, has_visual=has_visual, audio_mel=audio_mel, has_audio=has_audio)
         targets = ids.roll(-1, dims=1)[:, :-1]
         logits = logits[:, :-1]
 
         total_loss += F.cross_entropy(logits.reshape(-1, vocab_size), targets.reshape(-1), reduction="sum").item()
         correct += (logits.argmax(-1) == targets).sum().item()
         total_tokens += targets.numel()
+
+        # Free memory after each batch
+        del ids, images, has_visual, audio_mel, has_audio, logits, targets
+        if "cuda" in str(device):
+            torch.cuda.empty_cache()
 
     model.train()
     return {"loss": total_loss / total_tokens, "accuracy": correct / total_tokens}

@@ -47,6 +47,14 @@ class K3Config:
     vit_num_frames: int = 8
     vit_temporal_pool: int = 2
 
+    # --- audio encoder (Kimi-Audio style: Whisper encoder, continuous acoustic features) ---
+    use_audio: bool = False  # disabled by default (K3 doesn't natively support audio)
+    audio_n_mels: int = 80  # Whisper standard: 80 mel bins
+    audio_hidden: int = 256  # audio encoder hidden dim (separate from main hidden_dim)
+    audio_heads: int = 4
+    audio_layers: int = 6  # lighter than vision (Whisper tiny uses 4-6 layers)
+    audio_max_frames: int = 3000  # max ~30s at 100fps → 50fps after conv
+
     tie_embeddings: bool = True
     use_gradient_checkpointing: bool = False
 
@@ -58,6 +66,8 @@ class K3Config:
         assert self.num_experts_active <= self.num_routed_experts
         if self.use_vision:
             assert self.vit_hidden % self.vit_heads == 0
+        if self.use_audio:
+            assert self.audio_hidden % self.audio_heads == 0
 
     @property
     def head_dim(self) -> int:
@@ -117,6 +127,7 @@ class K3HFConfig(PretrainedConfig):
                  num_shared_experts=2, moe_hidden_per_expert=128, shared_moe_hidden=256, situglu_beta1=4.0,
                  situglu_beta2=25.0, use_mtp=True, use_vision=True, vit_layers=4, vit_hidden=128, vit_heads=4,
                  vit_patch_size=14, vit_mlp_ratio=4.0, vit_num_frames=8, vit_temporal_pool=2,
+                 use_audio=False, audio_n_mels=80, audio_hidden=256, audio_heads=4, audio_layers=6, audio_max_frames=3000,
                  tie_embeddings=True, use_gradient_checkpointing=False, **kwargs):
         super().__init__(**kwargs)
         self.vocab_size = vocab_size
@@ -147,6 +158,12 @@ class K3HFConfig(PretrainedConfig):
         self.vit_mlp_ratio = vit_mlp_ratio
         self.vit_num_frames = vit_num_frames
         self.vit_temporal_pool = vit_temporal_pool
+        self.use_audio = use_audio
+        self.audio_n_mels = audio_n_mels
+        self.audio_hidden = audio_hidden
+        self.audio_heads = audio_heads
+        self.audio_layers = audio_layers
+        self.audio_max_frames = audio_max_frames
         self.tie_embeddings = tie_embeddings
         self.use_gradient_checkpointing = use_gradient_checkpointing
 
