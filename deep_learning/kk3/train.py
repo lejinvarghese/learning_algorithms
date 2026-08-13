@@ -55,10 +55,10 @@ def get_datasets(n_train, n_eval, seq_len, frame_size, num_frames, use_audio=Fal
 @click.option("--resume", type=click.Path(exists=True), default=None, help="resume from checkpoint")
 @click.option("--adam", is_flag=True, help="use Adam instead of Muon (10-20x faster optimizer)")
 @click.option(
-    "--active-experts", type=int, default=4, help="number of active experts (3.1% activation rate, closer to paper)"
+    "--active-experts", type=int, default=2, help="number of active experts"
 )
 @click.option(
-    "--total-experts", type=int, default=128, help="total number of routed experts (higher capacity, paper uses 896)"
+    "--total-experts", type=int, default=64, help="total number of routed experts"
 )
 @click.option(
     "--use-audio", is_flag=True, help="enable audio encoder and load audio dataset"
@@ -67,13 +67,13 @@ def get_datasets(n_train, n_eval, seq_len, frame_size, num_frames, use_audio=Fal
     "--use-video", is_flag=True, help="enable video dataset (lv12/MultiModalDataset openvid config)"
 )
 @click.option(
-    "--expert-size", type=int, default=48, help="hidden dim per routed expert"
+    "--expert-size", type=int, default=32, help="hidden dim per routed expert"
 )
 @click.option(
-    "--hidden-dim", type=int, default=192, help="model hidden dimension"
+    "--hidden-dim", type=int, default=128, help="model hidden dimension"
 )
 @click.option(
-    "--vocab-size", type=int, default=163840, help="vocabulary size"
+    "--vocab-size", type=int, default=50000, help="vocabulary size"
 )
 def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts, total_experts, use_audio, use_video, expert_size, hidden_dim, vocab_size):
 
