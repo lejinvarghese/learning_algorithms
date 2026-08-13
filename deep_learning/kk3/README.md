@@ -60,57 +60,56 @@ unused modalities zeroed via mask flags.
 and `k3/video.py`'s four small cached real video clips — no network dependency, useful for a
 quick sanity check or CI.
 
-## Pretrained Initialization
+## Genesis: Evolutionary Initialization
 
-Instead of training from scratch, initialize K3 from pretrained foundation models:
+Create K3 from ancestral models (SmolLM2-360M + CLIP):
 
 ```bash
-# Transfer weights from SmolLM2-360M (language) + SigLIP (vision)
-uv run python -m base.transfer_weights \
-    --source smollm2-360m \
-    --vision siglip-so400m \
-    --output checkpoints/k3_init.pt
-
-# Then train from this checkpoint
-python train.py --resume checkpoints/k3_init.pt
+uv run python genesis.py
+# → checkpoints/k3_pretrained_init.pt (74M total, 24M active)
 ```
 
-**What gets transferred:**
-- ✅ Embeddings (BPE→BPE, vocab adapted 50K→164K)
-- ✅ Layer norms
-- ✅ MoE experts (cloned from dense FFNs with noise)
-- ✅ Vision encoder (SigLIP→MoonViT)
-- ❌ Attention (left random - KDA/MLA incompatible with standard attention)
+**Transferred:**
+- Embeddings (960d→64d adapted)
+- Layer norms
+- MoE experts (dense FFN→512 diverse experts)
+- Vision encoder (CLIP→MoonViT)
 
-Expected benefits: 2-5x faster convergence and better final performance. Based on research-proven "MoE upcycling" and heterogeneous weight transfer. See `base/README.md` for details and research precedent.
+Attention initialized randomly (KDA/MLA incompatible with standard attention).
 
-## Run
+## Essential Commands
 
 ```bash
-uv sync                                      # install dependencies
+# 1. Create pretrained init
+uv run python genesis.py
 
-# Text + images only (baseline)
-python train.py --adam --n-train 10000
-
-# Add audio
-python train.py --adam --use-audio --n-train 10000
-
-# Add video
-python train.py --adam --use-video --n-train 10000
-
-# All modalities
-python train.py --adam --use-audio --use-video --n-train 5000 --epochs 2
-
-# Quick test
+# 2. Quick test (all modalities, pretrained init)
 ./scripts/quick_test.sh
+
+# 3. Full training
+uv run python train.py \
+    --adam \
+    --use-audio \
+    --use-video \
+    --n-train 5000 \
+    --batch-size 1 \
+    --grad-accum 4 \
+    --epochs 2 \
+    --resume checkpoints/k3_pretrained_init.pt
 ```
 
-**Key options:**
-- `--adam`: Use AdamW (10-20x faster than Muon)
-- `--use-audio`: Enable audio encoder + audioset dataset
-- `--use-video`: Enable video dataset (openvid config)
-- `--n-train`: Samples per modality (default: 10K)
-- `--batch-size`: Batch size (default: 8)
+**Current architecture (balanced config):**
+- hidden_dim: 64 (small activations)
+- expert_size: 64 (no bottleneck)
+- total_experts: 512
+- active_experts: 8 (1.5% sparsity)
+- **Result: 74M total, 24M active (33% active)**
+
+**Key flags:**
+- `--adam`: AdamW optimizer (faster than Muon)
+- `--use-audio/--use-video`: Enable modalities
+- `--grad-accum`: Gradient accumulation (effective batch = batch × accum)
+- `--resume`: Start from checkpoint
 
 **Hardcoded configuration:**
 - Optimizer: K3 (per-head Muon for Q/K/V, Muon for 2D+, Adam for 1D)
