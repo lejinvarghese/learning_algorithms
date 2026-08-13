@@ -66,7 +66,16 @@ def get_datasets(n_train, n_eval, seq_len, frame_size, num_frames, use_audio=Fal
 @click.option(
     "--use-video", is_flag=True, help="enable video dataset (lv12/MultiModalDataset openvid config)"
 )
-def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts, total_experts, use_audio, use_video):
+@click.option(
+    "--expert-size", type=int, default=48, help="hidden dim per routed expert"
+)
+@click.option(
+    "--hidden-dim", type=int, default=192, help="model hidden dimension"
+)
+@click.option(
+    "--vocab-size", type=int, default=163840, help="vocabulary size"
+)
+def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts, total_experts, use_audio, use_video, expert_size, hidden_dim, vocab_size):
 
     accelerator = Accelerator(
         gradient_accumulation_steps=1,
@@ -91,17 +100,17 @@ def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts, tota
         # Sparse expert config matching paper's design: many experts, few active
         # 128 experts @ 3.1% activation (4/128) - closer to paper's 2.0% (18/896)
         cfg = K3Config(
-            vocab_size=163840,
-            hidden_dim=192,
+            vocab_size=vocab_size,
+            hidden_dim=hidden_dim,
             num_blocks=4,
             layers_per_block=4,
             num_routed_experts=total_experts,
             num_experts_active=active_experts,
-            num_shared_experts=2,
-            moe_hidden_per_expert=48,
-            shared_moe_hidden=96,
+            num_shared_experts=1,
+            moe_hidden_per_expert=expert_size,
+            shared_moe_hidden=expert_size * 2,
             use_vision=True,
-            use_audio=use_audio,  # Enable audio if flag set
+            use_audio=use_audio,
             use_gradient_checkpointing=True,
             vit_num_frames=4,
         )
