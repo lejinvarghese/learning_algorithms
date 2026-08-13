@@ -26,7 +26,7 @@ Simplifications, and why they don't change the shape:
 - **Quantile Balancing** computes an exact quantile rather than approximating one from a
   cross-rank histogram — the histogram exists only to make the quantile affordable when sharding
   a huge expert pool across many devices; computed directly, it's the identical update.
-- No audio — Kimi K3 itself has no audio modality (text + native vision only).
+- Audio encoder added (Whisper-style, 80 mel bins, 6 transformer layers) — extends beyond Kimi K3's text+vision.
 
 ## Scaling
 
@@ -47,16 +47,14 @@ Or override any field directly: `K3Config(hidden_dim=192, num_routed_experts=16,
 
 ## Data
 
-`train.py` trains on [lv12/MultiModalDataset](https://huggingface.co/datasets/lv12/MultiModalDataset) 
-streamed from Hugging Face (`k3/hf_data.py`):
-- **fineweb** config: 37.5K high-quality web text samples (>8,192 tokens each)
-- **coco** config: 37.5K COCO 2017 image-caption pairs (512x512 resolution)
-- **audioset** config: 10K audio samples with human-annotated labels (audio encoder not yet implemented)
+`train.py` trains on [lv12/MultiModalDataset](https://huggingface.co/datasets/lv12/MultiModalDataset):
+- **fineweb**: Text-only (high-quality web content)
+- **coco**: Image-caption pairs
+- **audioset**: Audio clips with captions (Whisper-style encoder)
+- **openvid**: Video clips (4 frames/video, spatial-temporal attention)
 
-Every sample — text-only or image-paired — is shaped identically (`ids`, `frames: [num_frames, 3, H, W]`, 
-`has_visual`) so they batch together in one `DataLoader`; text-only samples carry an all-zero frame tensor 
-and `has_visual=0`, which zeroes out the vision contribution in `K3Model.forward` for that sample. 
-Audio support requires implementing an audio encoder to process the audioset config.
+Unified 5-item format: `(ids, frames, has_visual, audio_mel, has_audio)`. All modalities batch together; 
+unused modalities zeroed via mask flags.
 
 `--toy` switches to fully offline data instead: `k3/data.py`'s procedural colored-block images
 and `k3/video.py`'s four small cached real video clips — no network dependency, useful for a
@@ -90,19 +88,29 @@ Expected benefits: 2-5x faster convergence and better final performance. Based o
 
 ```bash
 uv sync                                      # install dependencies
-python train.py                              # default: 5 epochs, batch 16, 100K samples/modality
-python train.py --epochs 10                  # train for 10 epochs
-python train.py --batch-size 32              # larger batch size
-python train.py --n-train 10000              # 10K samples per modality
-python train.py --n-eval 5000                # 5K eval samples
-python train.py --epochs 10 --n-train 50000  # combine options
+
+# Text + images only (baseline)
+python train.py --adam --n-train 10000
+
+# Add audio
+python train.py --adam --use-audio --n-train 10000
+
+# Add video
+python train.py --adam --use-video --n-train 10000
+
+# All modalities
+python train.py --adam --use-audio --use-video --n-train 5000 --epochs 2
+
+# Quick test
+./scripts/quick_test.sh
 ```
 
-**Available options:**
-- `--epochs`: Number of training epochs (default: 2)
-- `--batch-size`: Training batch size (default: 12)
-- `--n-train`: Training samples per modality (default: 100,000)
-- `--n-eval`: Evaluation samples per modality (default: 1,000)
+**Key options:**
+- `--adam`: Use AdamW (10-20x faster than Muon)
+- `--use-audio`: Enable audio encoder + audioset dataset
+- `--use-video`: Enable video dataset (openvid config)
+- `--n-train`: Samples per modality (default: 10K)
+- `--batch-size`: Batch size (default: 8)
 
 **Hardcoded configuration:**
 - Optimizer: K3 (per-head Muon for Q/K/V, Muon for 2D+, Adam for 1D)
@@ -135,8 +143,8 @@ python infer.py --checkpoint checkpoints/k3_epoch1.pt --text "once upon a time" 
 - `--temperature`: Sampling temperature (default: 0.8)
 - `--device`: Device override (auto-detects if not specified)
 
-The model uses Kimi K3's tiktoken-based BPE tokenizer (163,840 tokens). For image captioning, vision 
-embeddings condition the generation as continuous features (not discrete tokens).
+The model uses Kimi K3's tiktoken-based BPE tokenizer (163,840 tokens). Multimodal inputs (images, video, audio) 
+are encoded as continuous token sequences prepended to text, preserving temporal structure for video.
 
 ## Publish to HuggingFace
 

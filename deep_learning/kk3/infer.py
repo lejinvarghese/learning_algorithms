@@ -33,10 +33,6 @@ def load_checkpoint(ckpt_path: str, device: str):
     tokenizer = get_k3_tokenizer()
 
     click.secho(f"Loaded checkpoint from epoch {ckpt['epoch']}", fg="green")
-    click.secho(
-        f"Eval metrics: loss={ckpt['eval_metrics']['loss']:.4f}, " f"accuracy={ckpt['eval_metrics']['accuracy']:.2%}",
-        fg="cyan",
-    )
     return model, cfg, tokenizer
 
 
@@ -78,10 +74,17 @@ def generate(
     prompt_ids: torch.Tensor,
     images: torch.Tensor = None,
     max_new_tokens: int = 64,
-    temperature: float = 0.1,
+    temperature: float = 0.2,
     device: str = "cuda",
 ):
-    """Generate text continuation."""
+    """Generate text continuation.
+
+    Note: This uses naive autoregressive generation without KV/state caching.
+    Each iteration reprocesses the full sequence. For K3's hybrid attention:
+    - KDA could cache recurrent state S
+    - Gated MLA could cache K/V matrices
+    But this requires model architecture changes (not implemented yet).
+    """
     prompt_ids = prompt_ids.to(device).unsqueeze(0)  # (1, seq_len)
     has_visual = torch.tensor(1.0 if images is not None else 0.0, device=device)
 
@@ -92,13 +95,21 @@ def generate(
     prompt_len = (prompt_ids != 0).sum().item()
 
     for i in range(max_new_tokens):
-        # Forward pass
-        logits, _, _ = model(generated, images=images, has_visual=has_visual)
+        current_len = prompt_len + i
 
-        # Sample next token
-        next_token_logits = logits[0, prompt_len + i - 1] / temperature
-        probs = F.softmax(next_token_logits, dim=-1)
-        next_token = torch.multinomial(probs, 1).item()
+        # Only process up to current length (minor optimization)
+        current_seq = generated[:, :current_len]
+
+        # Forward pass - still reprocesses everything (needs caching for real speedup)
+        logits, _, _ = model(current_seq, images=images, has_visual=has_visual)
+
+        # Sample next token (greedy if temp very low, otherwise sample)
+        next_token_logits = logits[0, -1]  # Last position
+        if temperature < 0.01:
+            next_token = next_token_logits.argmax().item()
+        else:
+            probs = F.softmax(next_token_logits / temperature, dim=-1)
+            next_token = torch.multinomial(probs, 1).item()
 
         # Stop at padding, invalid tokens, or EOS
         if next_token == 0 or next_token >= cfg.vocab_size:
@@ -107,8 +118,8 @@ def generate(
             break
 
         # Add to sequence
-        if prompt_len + i < generated.shape[1]:
-            generated[0, prompt_len + i] = next_token
+        if current_len < generated.shape[1]:
+            generated[0, current_len] = next_token
         else:
             break
 
@@ -120,7 +131,7 @@ def generate(
 @click.option("--text", type=str, help="Text prompt for completion")
 @click.option("--image", type=click.Path(exists=True), help="Image path for captioning")
 @click.option("--max-tokens", type=int, default=64, help="Max tokens to generate")
-@click.option("--temperature", type=float, default=0.8, help="Sampling temperature")
+@click.option("--temperature", type=float, default=0.01, help="Sampling temperature")
 @click.option("--device", type=str, default=None, help="Device (auto-detect if not specified)")
 def main(checkpoint, text, image, max_tokens, temperature, device):
     """Run inference with K3 model."""
