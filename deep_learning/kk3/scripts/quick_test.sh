@@ -10,14 +10,15 @@ export HF_HOME="/media/starscream/wheeljack1/.cache/huggingface"
 export HF_DATASETS_CACHE="/media/starscream/wheeljack1/.cache/huggingface/datasets"
 export TRANSFORMERS_CACHE="/media/starscream/wheeljack1/.cache/huggingface/transformers"
 
-# Full multimodal with proper MoE sparsity
+# Full multimodal with pretrained init
 uv run python train.py \
     --adam \
     --use-audio \
     --use-video \
     --n-train 500 \
     --batch-size 1 \
-    --epochs 1
+    --epochs 1 \
+    --resume checkpoints/k3_pretrained_init.pt
 
 echo ""
 echo "✅ Test complete! If this ran without errors, you're ready for full training."
