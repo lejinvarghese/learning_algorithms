@@ -17,7 +17,7 @@ uv run python train.py \
     --use-video \
     --n-train 200 \
     --n-eval 20 \
-    --batch-size 1 \
+    --batch-size 2 \
     --epochs 1
 
 echo ""
