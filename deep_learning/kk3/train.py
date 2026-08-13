@@ -50,6 +50,7 @@ def get_datasets(n_train, n_eval, seq_len, frame_size, num_frames, use_audio=Fal
 @click.command()
 @click.option("--epochs", type=int, default=2, show_default=True, help="number of training epochs")
 @click.option("--batch-size", type=int, default=8, show_default=True, help="training batch size")
+@click.option("--grad-accum", type=int, default=4, show_default=True, help="gradient accumulation steps")
 @click.option("--n-train", type=int, default=10_000, show_default=True, help="samples per source, training split (reduced for memory)")
 @click.option("--n-eval", type=int, default=100, show_default=True, help="samples per source, evaluation split (small - eval only uses first 10 batches)")
 @click.option("--resume", type=click.Path(exists=True), default=None, help="resume from checkpoint")
@@ -75,11 +76,11 @@ def get_datasets(n_train, n_eval, seq_len, frame_size, num_frames, use_audio=Fal
 @click.option(
     "--vocab-size", type=int, default=163840, help="vocabulary size (must match tokenizer)"
 )
-def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts, total_experts, use_audio, use_video, expert_size, hidden_dim, vocab_size):
+def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts, total_experts, use_audio, use_video, expert_size, hidden_dim, vocab_size, grad_accum):
 
     accelerator = Accelerator(
-        gradient_accumulation_steps=1,
-        mixed_precision="no",  # fp32 required for Muon's Newton-Schulz stability
+        gradient_accumulation_steps=grad_accum,
+        mixed_precision="no",
         log_with="wandb",
     )
 
@@ -140,10 +141,10 @@ def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts, tota
         # Fused AdamW: CUDA-optimized, 2-3× faster than standard
         opt = torch.optim.AdamW(
             model.parameters(),
-            lr=1.5e-4,  # MoE-tuned: >2e-4 causes plateau, 1.5e-4 is sweet spot
+            lr=5e-4,  # Higher LR for training from scratch with large model
             betas=(0.9, 0.95),
-            weight_decay=0.01,  # Reduced from 0.1 - less regularization for sparse models
-            fused=torch.cuda.is_available(),  # Use fused kernels on CUDA
+            weight_decay=0.01,
+            fused=torch.cuda.is_available(),
         )
         if accelerator.is_main_process:
             click.secho("Using fused AdamW optimizer (fast mode, modern hyperparams)", fg="green")
@@ -185,8 +186,10 @@ def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts, tota
             "num_experts": cfg.num_routed_experts,
             "active_experts": cfg.num_experts_active,
             "batch_size": batch_size,
+            "grad_accum_steps": grad_accum,
+            "effective_batch_size": batch_size * grad_accum,
             "optimizer": "AdamW" if adam else "K3-Muon",
-            "learning_rate": 1.5e-4 if adam else 1e-3,
+            "learning_rate": 5e-4 if adam else 1e-3,
             "epochs": epochs,
         },
     )
