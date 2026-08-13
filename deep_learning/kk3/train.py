@@ -17,7 +17,7 @@ from k3.data import HFImageCaptionDataset, HFTextDataset
 from optimizer import create_k3_optimizer
 
 
-def get_datasets(n_train, n_eval, seq_len, frame_size, num_frames, use_audio=False):
+def get_datasets(n_train, n_eval, seq_len, frame_size, num_frames, use_audio=False, use_video=False):
     train_sets = [
         HFTextDataset("train", n_train, seq_len, frame_size, num_frames),
         HFImageCaptionDataset("train", n_train, seq_len, frame_size, num_frames),
@@ -34,6 +34,14 @@ def get_datasets(n_train, n_eval, seq_len, frame_size, num_frames, use_audio=Fal
         train_sets.append(HFAudioDataset("train", n_train, seq_len, max_audio_len=1500,
                                          num_frames=num_frames, frame_size=frame_size))
         test_sets.append(HFAudioDataset("val", n_eval, seq_len, max_audio_len=1500,
+                                        num_frames=num_frames, frame_size=frame_size))
+
+    # Add video dataset if enabled
+    if use_video:
+        from k3.video_data import HFVideoDataset
+        train_sets.append(HFVideoDataset("train", n_train, seq_len,
+                                         num_frames=num_frames, frame_size=frame_size))
+        test_sets.append(HFVideoDataset("val", n_eval, seq_len,
                                         num_frames=num_frames, frame_size=frame_size))
 
     return ConcatDataset(train_sets), ConcatDataset(test_sets)
@@ -55,7 +63,10 @@ def get_datasets(n_train, n_eval, seq_len, frame_size, num_frames, use_audio=Fal
 @click.option(
     "--use-audio", is_flag=True, help="enable audio encoder and load audio dataset"
 )
-def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts, total_experts, use_audio):
+@click.option(
+    "--use-video", is_flag=True, help="enable video dataset (lv12/MultiModalDataset openvid config)"
+)
+def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts, total_experts, use_audio, use_video):
 
     accelerator = Accelerator(
         gradient_accumulation_steps=1,
@@ -100,7 +111,8 @@ def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts, tota
 
     frame_size = cfg.vit_patch_size * 8
     train_data, test_data = get_datasets(
-        n_train=n_train, n_eval=n_eval, seq_len=64, frame_size=frame_size, num_frames=4, use_audio=use_audio
+        n_train=n_train, n_eval=n_eval, seq_len=64, frame_size=frame_size, num_frames=4,
+        use_audio=use_audio, use_video=use_video
     )
     train_loader = DataLoader(
         train_data,
