@@ -10,15 +10,13 @@ export HF_HOME="/media/starscream/wheeljack1/.cache/huggingface"
 export HF_DATASETS_CACHE="/media/starscream/wheeljack1/.cache/huggingface/datasets"
 export TRANSFORMERS_CACHE="/media/starscream/wheeljack1/.cache/huggingface/transformers"
 
-# Full multimodal with reduced experts for memory
+# Full multimodal quick test
 uv run python train.py \
     --adam \
     --use-audio \
     --use-video \
     --n-train 500 \
-    --batch-size 2 \
-    --active-experts 2 \
-    --total-experts 32 \
+    --batch-size 4 \
     --epochs 1
 
 echo ""

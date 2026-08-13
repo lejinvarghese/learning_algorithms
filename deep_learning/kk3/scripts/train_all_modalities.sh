@@ -22,11 +22,8 @@ uv run python train.py \
     --use-audio \
     --use-video \
     --n-train 5000 \
-    --n-eval 100 \
     --batch-size 8 \
-    --epochs 2 \
-    --active-experts 4 \
-    --total-experts 128
+    --epochs 2
 
 echo ""
 echo "✅ Multimodal training complete!"
