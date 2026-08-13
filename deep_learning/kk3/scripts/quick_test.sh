@@ -10,14 +10,14 @@ export HF_HOME="/media/starscream/wheeljack1/.cache/huggingface"
 export HF_DATASETS_CACHE="/media/starscream/wheeljack1/.cache/huggingface/datasets"
 export TRANSFORMERS_CACHE="/media/starscream/wheeljack1/.cache/huggingface/transformers"
 
-# Quick test with small dataset
+# Quick test with minimal settings for memory
 uv run python train.py \
     --adam \
     --use-audio \
     --use-video \
-    --n-train 500 \
-    --n-eval 50 \
-    --batch-size 4 \
+    --n-train 200 \
+    --n-eval 20 \
+    --batch-size 1 \
     --epochs 1
 
 echo ""

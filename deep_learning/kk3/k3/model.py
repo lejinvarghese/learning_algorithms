@@ -171,6 +171,7 @@ class K3Model(nn.Module):
         has_audio: Optional[torch.Tensor] = None,
     ):
         x = self.embed_norm(self.embed(input_ids))
+        num_prepended_tokens = 0  # Track prepended tokens for MTP head
 
         # Add vision features (prepend to sequence to preserve temporal structure)
         if images is not None and self.vision is not None:
@@ -179,6 +180,7 @@ class K3Model(nn.Module):
                 vis = vis * has_visual.view(-1, 1, 1)
             # Prepend visual tokens instead of adding (preserves temporal info for video)
             x = torch.cat([vis, x], dim=1)
+            num_prepended_tokens += vis.shape[1]
 
         # Add audio features (prepend to sequence)
         if audio_mel is not None and self.audio is not None:
@@ -187,6 +189,7 @@ class K3Model(nn.Module):
                 aud = aud * has_audio.view(-1, 1, 1)
             # Prepend audio tokens
             x = torch.cat([aud, x], dim=1)
+            num_prepended_tokens += aud.shape[1]
 
         block_reps = [x]
         total_router_z_loss = 0.0
@@ -201,9 +204,11 @@ class K3Model(nn.Module):
         h = self.final_norm(block_reps[-1])
         logits = self.lm_head(h)
 
-        # Handle MTP head if present
+        # Handle MTP head if present (only on text tokens, not prepended modality tokens)
         if self.mtp is not None:
-            mtp_out, mtp_router_z_loss, mtp_load_balance_loss = self.mtp(h, input_ids)
+            # Extract only text portion for MTP
+            h_text = h[:, num_prepended_tokens:] if num_prepended_tokens > 0 else h
+            mtp_out, mtp_router_z_loss, mtp_load_balance_loss = self.mtp(h_text, input_ids)
             mtp_logits = self.lm_head(mtp_out)
             total_router_z_loss = total_router_z_loss + mtp_router_z_loss
             total_load_balance_loss = total_load_balance_loss + mtp_load_balance_loss
