@@ -73,7 +73,7 @@ def get_datasets(n_train, n_eval, seq_len, frame_size, num_frames, use_audio=Fal
     "--hidden-dim", type=int, default=128, help="model hidden dimension"
 )
 @click.option(
-    "--vocab-size", type=int, default=50000, help="vocabulary size"
+    "--vocab-size", type=int, default=163840, help="vocabulary size (must match tokenizer)"
 )
 def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts, total_experts, use_audio, use_video, expert_size, hidden_dim, vocab_size):
 
