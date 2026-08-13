@@ -57,8 +57,13 @@ def extract_zip_subset(zip_path: str, output_dir: str, max_files: int) -> list:
     return extracted
 
 
-def extract_frames_from_video(video_path: str, num_frames: int = 4, frame_size: int = 112) -> list:
-    """Extract uniformly sampled frames from video using OpenCV."""
+def extract_frames_from_video(video_path: str, num_frames: int = 4, frame_size: int = 112, random_sample: bool = False) -> list:
+    """
+    Extract frames from video using OpenCV.
+
+    Args:
+        random_sample: If True, sample frames with temporal jittering for augmentation
+    """
     try:
         cap = cv2.VideoCapture(video_path)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -67,8 +72,19 @@ def extract_frames_from_video(video_path: str, num_frames: int = 4, frame_size: 
             cap.release()
             return None
 
-        # Uniform sampling
-        indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
+        # Uniform sampling (with optional jitter for augmentation)
+        if random_sample and total_frames > num_frames * 2:
+            # Random sampling with jitter (for training augmentation)
+            segment_len = total_frames // num_frames
+            indices = []
+            for i in range(num_frames):
+                start = i * segment_len
+                end = min((i + 1) * segment_len, total_frames - 1)
+                indices.append(np.random.randint(start, end + 1))
+            indices = np.array(indices, dtype=int)
+        else:
+            # Fixed uniform sampling (for preprocessing/eval)
+            indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
 
         frames = []
         for idx in indices:

@@ -172,19 +172,21 @@ class K3Model(nn.Module):
     ):
         x = self.embed_norm(self.embed(input_ids))
 
-        # Add vision features
+        # Add vision features (prepend to sequence to preserve temporal structure)
         if images is not None and self.vision is not None:
-            vis = self.vision(images).mean(1, keepdim=True)
+            vis = self.vision(images)  # (B, num_temporal_tokens, D)
             if has_visual is not None:
                 vis = vis * has_visual.view(-1, 1, 1)
-            x = x + vis
+            # Prepend visual tokens instead of adding (preserves temporal info for video)
+            x = torch.cat([vis, x], dim=1)
 
-        # Add audio features
+        # Add audio features (prepend to sequence)
         if audio_mel is not None and self.audio is not None:
-            aud = self.audio(audio_mel).mean(1, keepdim=True)
+            aud = self.audio(audio_mel)  # (B, num_audio_tokens, D)
             if has_audio is not None:
                 aud = aud * has_audio.view(-1, 1, 1)
-            x = x + aud
+            # Prepend audio tokens
+            x = torch.cat([aud, x], dim=1)
 
         block_reps = [x]
         total_router_z_loss = 0.0
