@@ -67,10 +67,10 @@ def get_datasets(n_train, n_eval, seq_len, frame_size, num_frames, use_audio=Fal
     "--use-video", is_flag=True, help="enable video dataset (lv12/MultiModalDataset openvid config)"
 )
 @click.option(
-    "--expert-size", type=int, default=32, help="hidden dim per routed expert"
+    "--expert-size", type=int, default=64, help="hidden dim per routed expert"
 )
 @click.option(
-    "--hidden-dim", type=int, default=128, help="model hidden dimension"
+    "--hidden-dim", type=int, default=64, help="model hidden dimension"
 )
 @click.option(
     "--vocab-size", type=int, default=163840, help="vocabulary size (must match tokenizer)"
