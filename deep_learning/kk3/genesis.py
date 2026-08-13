@@ -3,7 +3,8 @@
 import torch
 from k3 import K3Config, K3Model
 from base.transfer_weights import transfer_embeddings, transfer_layer_norms, transfer_moe_from_ffn, transfer_vision_encoder
-from transformers import AutoModel
+from base.transfer_audio import transfer_audio_encoder
+from transformers import AutoModel, WhisperModel
 import click
 
 # Balanced config: expert_size = hidden_dim = 64
@@ -30,18 +31,20 @@ model = K3Model(cfg)
 total_params = sum(p.numel() for p in model.parameters())
 click.secho(f"   Total params: {total_params/1e6:.1f}M\n", fg="green")
 
-# Load source models
-click.secho("📥 Loading source models...", fg="cyan")
+# Load ancestral models
+click.secho("📥 Loading ancestral models...", fg="cyan")
 source_lang = AutoModel.from_pretrained("HuggingFaceTB/SmolLM2-360M")
 source_vision = AutoModel.from_pretrained("openai/clip-vit-base-patch32")
-click.secho("   ✓ Models loaded\n", fg="green")
+source_audio = WhisperModel.from_pretrained("openai/whisper-base")
+click.secho("   ✓ Language (SmolLM2), Vision (CLIP), Audio (Whisper) loaded\n", fg="green")
 
-# Transfer components
+# Transfer components (evolutionary crossbreeding)
 click.secho("📦 Transferring weights with diverse expert initialization...", fg="cyan")
 transfer_embeddings(source_lang, model, cfg)
 transfer_layer_norms(source_lang, model, cfg)
 transfer_moe_from_ffn(source_lang, model, cfg)
 transfer_vision_encoder(source_vision, model, cfg)
+transfer_audio_encoder(source_audio, model, cfg)
 
 # Save checkpoint
 output_path = "checkpoints/k3_pretrained_init.pt"
