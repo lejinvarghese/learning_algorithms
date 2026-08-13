@@ -16,7 +16,7 @@ uv run python train.py \
     --use-audio \
     --use-video \
     --n-train 500 \
-    --batch-size 4 \
+    --batch-size 2 \
     --epochs 1
 
 echo ""
