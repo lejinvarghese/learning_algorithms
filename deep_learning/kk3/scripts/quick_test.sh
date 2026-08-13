@@ -10,13 +10,15 @@ export HF_HOME="/media/starscream/wheeljack1/.cache/huggingface"
 export HF_DATASETS_CACHE="/media/starscream/wheeljack1/.cache/huggingface/datasets"
 export TRANSFORMERS_CACHE="/media/starscream/wheeljack1/.cache/huggingface/transformers"
 
-# Minimal config for low-memory GPUs
+# Full multimodal with reduced experts for memory
 uv run python train.py \
     --adam \
+    --use-audio \
+    --use-video \
     --n-train 500 \
-    --batch-size 8 \
+    --batch-size 2 \
     --active-experts 2 \
-    --total-experts 16 \
+    --total-experts 32 \
     --epochs 1
 
 echo ""
