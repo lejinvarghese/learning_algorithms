@@ -25,11 +25,17 @@ def evaluate(model, loader: DataLoader, vocab_size: int, device: str, max_batche
         has_audio = has_audio.to(device)
 
         logits, _, _ = model(ids, images=images, has_visual=has_visual, audio_mel=audio_mel, has_audio=has_audio)
-        targets = ids.roll(-1, dims=1)[:, :-1]
-        logits = logits[:, :-1]
 
-        total_loss += F.cross_entropy(logits.reshape(-1, vocab_size), targets.reshape(-1), reduction="sum").item()
-        correct += (logits.argmax(-1) == targets).sum().item()
+        # Extract only text logits (skip prepended vision/audio tokens)
+        text_len = ids.shape[1]
+        num_prepended = logits.shape[1] - text_len
+        text_logits = logits[:, num_prepended:, :]
+
+        targets = ids.roll(-1, dims=1)[:, :-1]
+        text_logits = text_logits[:, :-1]
+
+        total_loss += F.cross_entropy(text_logits.reshape(-1, vocab_size), targets.reshape(-1), reduction="sum").item()
+        correct += (text_logits.argmax(-1) == targets).sum().item()
         total_tokens += targets.numel()
 
         # Free memory after each batch

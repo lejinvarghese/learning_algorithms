@@ -200,8 +200,19 @@ def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts, tota
                 logits, mtp_logits, aux_losses = model(
                     ids, images=images, has_visual=has_visual, audio_mel=audio_mel, has_audio=has_audio
                 )
+
+                # Logits include prepended vision/audio tokens, need to extract text portion
+                # logits shape: [B, text_len + prepended_tokens, vocab_size]
+                # ids shape: [B, text_len]
+                text_len = ids.shape[1]
+                num_prepended = logits.shape[1] - text_len
+
+                # Extract only text logits (skip prepended tokens)
+                text_logits = logits[:, num_prepended:, :]
+
                 targets = ids.roll(-1, dims=1)
-                loss = F.cross_entropy(logits[:, :-1].reshape(-1, cfg.vocab_size), targets[:, :-1].reshape(-1))
+                loss = F.cross_entropy(text_logits[:, :-1].reshape(-1, cfg.vocab_size), targets[:, :-1].reshape(-1))
+
                 if mtp_logits is not None:
                     mtp_targets = ids.roll(-2, dims=1)
                     loss = loss + 0.1 * F.cross_entropy(
