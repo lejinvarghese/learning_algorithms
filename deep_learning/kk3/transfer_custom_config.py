@@ -6,18 +6,19 @@ from base.transfer_weights import transfer_embeddings, transfer_layer_norms, tra
 from transformers import AutoModel
 import click
 
-# Exact config from train.py - sparse expert layout matching paper
+# Balanced config: expert_size = hidden_dim = 64
 cfg = K3Config(
     vocab_size=163840,
-    hidden_dim=192,
+    hidden_dim=64,
     num_blocks=4,
     layers_per_block=4,
-    num_routed_experts=128,  # Higher capacity (paper uses 896)
-    num_experts_active=4,    # Sparse activation (3.1% vs paper's 2.0%)
+    num_routed_experts=512,
+    num_experts_active=8,
     num_shared_experts=1,
-    moe_hidden_per_expert=48,
-    shared_moe_hidden=96,
+    moe_hidden_per_expert=64,
+    shared_moe_hidden=128,
     use_vision=True,
+    use_audio=True,
     use_gradient_checkpointing=True,
     vit_num_frames=4,
 )
