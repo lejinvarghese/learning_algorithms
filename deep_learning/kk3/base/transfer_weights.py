@@ -26,6 +26,11 @@ VISION_ENCODERS = {
     "clip-vit-base": "openai/clip-vit-base-patch32",
 }
 
+AUDIO_ENCODERS = {
+    "whisper-tiny": "openai/whisper-tiny",
+    "whisper-base": "openai/whisper-base",
+}
+
 
 def available_sources():
     """Return dict of available source models."""
