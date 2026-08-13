@@ -10,13 +10,13 @@ export HF_HOME="/media/starscream/wheeljack1/.cache/huggingface"
 export HF_DATASETS_CACHE="/media/starscream/wheeljack1/.cache/huggingface/datasets"
 export TRANSFORMERS_CACHE="/media/starscream/wheeljack1/.cache/huggingface/transformers"
 
-# Full multimodal quick test
+# Full multimodal with proper MoE sparsity
 uv run python train.py \
     --adam \
     --use-audio \
     --use-video \
     --n-train 500 \
-    --batch-size 2 \
+    --batch-size 1 \
     --epochs 1
 
 echo ""
