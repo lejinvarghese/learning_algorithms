@@ -5,8 +5,10 @@ set -e
 
 echo "🧪 Quick test run (100 steps, all modalities)..."
 
-# Source cache config
-source .env.cache
+# Force cache to wheeljack1
+export HF_HOME="/media/starscream/wheeljack1/.cache/huggingface"
+export HF_DATASETS_CACHE="/media/starscream/wheeljack1/.cache/huggingface/datasets"
+export TRANSFORMERS_CACHE="/media/starscream/wheeljack1/.cache/huggingface/transformers"
 
 # Quick test with small dataset
 uv run python train.py \

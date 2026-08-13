@@ -11,8 +11,10 @@ echo "  - Audio: lv12/MultiModalDataset/audioset"
 echo "  - Video: lv12/MultiModalDataset/openvid"
 echo ""
 
-# Source cache config
-source .env.cache
+# Force cache to wheeljack1
+export HF_HOME="/media/starscream/wheeljack1/.cache/huggingface"
+export HF_DATASETS_CACHE="/media/starscream/wheeljack1/.cache/huggingface/datasets"
+export TRANSFORMERS_CACHE="/media/starscream/wheeljack1/.cache/huggingface/transformers"
 
 # Full multimodal training
 uv run python train.py \
