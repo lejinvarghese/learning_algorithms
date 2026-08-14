@@ -69,7 +69,7 @@ def transfer_audio_encoder(whisper_model, k3_model, cfg):
         click.secho("    ✓ Positional embeddings transferred", fg="green")
 
     # 3. Transfer transformer layers
-    whisper_layers = encoder.blocks
+    whisper_layers = encoder.layers
     k3_layers = k3_audio.layers
     num_layers = min(len(whisper_layers), len(k3_layers))
 
@@ -79,9 +79,9 @@ def transfer_audio_encoder(whisper_model, k3_model, cfg):
         w_layer = whisper_layers[i]
         k3_layer = k3_layers[i]
 
-        # Attention (Whisper uses MultiheadAttention, K3 uses same)
-        if hasattr(w_layer, 'attn'):
-            w_attn = w_layer.attn
+        # Attention (Whisper uses self_attn, K3 uses attn)
+        if hasattr(w_layer, 'self_attn'):
+            w_attn = w_layer.self_attn
             k3_attn = k3_layer.attn
 
             # Adapt Q, K, V projections
@@ -125,42 +125,39 @@ def transfer_audio_encoder(whisper_model, k3_model, cfg):
                             else:
                                 k3_param.data[:whisper_hidden].copy_(w_param.data)
 
-        # FFN (Whisper uses fc1, fc2)
-        if hasattr(w_layer, 'mlp'):
-            w_mlp = w_layer.mlp
+        # FFN (Whisper has fc1, fc2 directly on layer)
+        if hasattr(w_layer, 'fc1') and hasattr(w_layer, 'fc2'):
             k3_ffn = k3_layer.ffn
 
             # fc1: [hidden, hidden*4]
-            if hasattr(w_mlp, 'fc1'):
-                w_fc1 = w_mlp.fc1.weight.data  # [4*whisper_hidden, whisper_hidden]
-                if whisper_hidden >= k3_hidden:
-                    adapted = w_fc1[:4*k3_hidden, :k3_hidden]
-                else:
-                    adapted = torch.zeros(4*k3_hidden, k3_hidden)
-                    adapted[:4*whisper_hidden, :whisper_hidden] = w_fc1
-                k3_ffn[0].weight.data.copy_(rescale_weights(adapted, target_std=0.02))
+            w_fc1 = w_layer.fc1.weight.data  # [4*whisper_hidden, whisper_hidden]
+            if whisper_hidden >= k3_hidden:
+                adapted = w_fc1[:4*k3_hidden, :k3_hidden]
+            else:
+                adapted = torch.zeros(4*k3_hidden, k3_hidden)
+                adapted[:4*whisper_hidden, :whisper_hidden] = w_fc1
+            k3_ffn[0].weight.data.copy_(rescale_weights(adapted, target_std=0.02))
 
-                if hasattr(w_mlp.fc1, 'bias'):
-                    if whisper_hidden >= k3_hidden:
-                        k3_ffn[0].bias.data.copy_(w_mlp.fc1.bias.data[:4*k3_hidden])
-                    else:
-                        k3_ffn[0].bias.data[:4*whisper_hidden].copy_(w_mlp.fc1.bias.data)
+            if hasattr(w_layer.fc1, 'bias'):
+                if whisper_hidden >= k3_hidden:
+                    k3_ffn[0].bias.data.copy_(w_layer.fc1.bias.data[:4*k3_hidden])
+                else:
+                    k3_ffn[0].bias.data[:4*whisper_hidden].copy_(w_layer.fc1.bias.data)
 
             # fc2: [hidden*4, hidden]
-            if hasattr(w_mlp, 'fc2'):
-                w_fc2 = w_mlp.fc2.weight.data  # [whisper_hidden, 4*whisper_hidden]
-                if whisper_hidden >= k3_hidden:
-                    adapted = w_fc2[:k3_hidden, :4*k3_hidden]
-                else:
-                    adapted = torch.zeros(k3_hidden, 4*k3_hidden)
-                    adapted[:whisper_hidden, :4*whisper_hidden] = w_fc2
-                k3_ffn[2].weight.data.copy_(rescale_weights(adapted, target_std=0.02))
+            w_fc2 = w_layer.fc2.weight.data  # [whisper_hidden, 4*whisper_hidden]
+            if whisper_hidden >= k3_hidden:
+                adapted = w_fc2[:k3_hidden, :4*k3_hidden]
+            else:
+                adapted = torch.zeros(k3_hidden, 4*k3_hidden)
+                adapted[:whisper_hidden, :4*whisper_hidden] = w_fc2
+            k3_ffn[2].weight.data.copy_(rescale_weights(adapted, target_std=0.02))
 
-                if hasattr(w_mlp.fc2, 'bias'):
-                    if whisper_hidden >= k3_hidden:
-                        k3_ffn[2].bias.data.copy_(w_mlp.fc2.bias.data[:k3_hidden])
-                    else:
-                        k3_ffn[2].bias.data[:whisper_hidden].copy_(w_mlp.fc2.bias.data)
+            if hasattr(w_layer.fc2, 'bias'):
+                if whisper_hidden >= k3_hidden:
+                    k3_ffn[2].bias.data.copy_(w_layer.fc2.bias.data[:k3_hidden])
+                else:
+                    k3_ffn[2].bias.data[:whisper_hidden].copy_(w_layer.fc2.bias.data)
 
         # Layer norms (Whisper uses LayerNorm, K3 uses RMSNorm - only transfer scale)
         if hasattr(w_layer, 'self_attn_layer_norm'):
@@ -182,7 +179,7 @@ def transfer_audio_encoder(whisper_model, k3_model, cfg):
     click.secho(f"    ✓ {num_layers} transformer layers transferred", fg="green")
 
     # 4. Transfer final layer norm
-    if hasattr(encoder, 'layer_norm'):
+    if hasattr(encoder, 'layer_norm') and encoder.layer_norm is not None:
         w_norm = encoder.layer_norm.weight.data
         if whisper_hidden >= k3_hidden:
             k3_audio.final_norm.weight.data.copy_(w_norm[:k3_hidden])
