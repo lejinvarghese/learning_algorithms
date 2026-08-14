@@ -223,7 +223,12 @@ def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts, tota
                 text_logits = logits[:, num_prepended:, :]
 
                 targets = ids.roll(-1, dims=1)
-                loss = F.cross_entropy(text_logits[:, :-1].reshape(-1, cfg.vocab_size), targets[:, :-1].reshape(-1))
+                # Mask out padding tokens (0s) from loss - they're not real targets
+                mask = (targets[:, :-1] != 0).reshape(-1)
+                loss = F.cross_entropy(
+                    text_logits[:, :-1].reshape(-1, cfg.vocab_size)[mask],
+                    targets[:, :-1].reshape(-1)[mask]
+                ) if mask.any() else torch.tensor(0.0, device=ids.device)
 
                 if mtp_logits is not None:
                     mtp_targets = ids.roll(-2, dims=1)
@@ -288,9 +293,10 @@ def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts, tota
                     accelerator.log({
                         "eval/loss": metrics['loss'],
                         "eval/accuracy": metrics['accuracy'],
+                        "eval/top5_accuracy": metrics['top5_accuracy'],
                     }, step=global_step)
                     click.secho(
-                        f"[step {global_step}] eval: loss={metrics['loss']:.4f} accuracy={metrics['accuracy']:.2%}",
+                        f"[step {global_step}] eval: loss={metrics['loss']:.4f} acc={metrics['accuracy']:.2%} top5={metrics['top5_accuracy']:.2%}",
                         fg="blue",
                     )
                 # Clear CUDA cache after eval
