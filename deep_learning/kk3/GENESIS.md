@@ -2,7 +2,7 @@
 
 ## Ancestral Species
 
-K3 inherits genetic material from two pretrained foundation models:
+K3 inherits genetic material from three pretrained foundation models:
 
 ### Language Ancestor: SmolLM2-360M
 - **Genome**: 360M parameters trained on 4T tokens
@@ -19,12 +19,21 @@ K3 inherits genetic material from two pretrained foundation models:
   - Patch embedding (spatial feature extraction)
   - Vision MLP layers (adapted to projector)
 
+### Audio Ancestor: Whisper-base
+- **Genome**: 74M parameters (37M encoder) trained on 680K hours of audio
+- **Lineage**: openai/whisper-base
+- **Inherited traits**:
+  - Conv downsampling (80 mel bins → hidden)
+  - Positional embeddings (1500 frames → 3000 adapted)
+  - 6 transformer layers (512d → 256d adapted)
+  - Layer normalizations
+
 ## Evolutionary Mechanisms
 
 ### 1. **Crossbreeding** (Heterogeneous Transfer)
-Combines genetic material from two unrelated species:
+Combines genetic material from three unrelated species:
 ```
-Language DNA (SmolLM2) + Vision DNA (CLIP) → Multimodal K3
+Language (SmolLM2) + Vision (CLIP) + Audio (Whisper) → Multimodal K3
 ```
 
 ### 2. **Mutation** (Adaptive Noise)
@@ -46,10 +55,9 @@ Adapts ancestor traits to new environment:
 ### 4. **Genetic Drift** (Random Initialization)
 Some traits can't transfer (architectural incompatibility):
 - **Attention**: Left random (KDA/MLA ≠ standard attention)
-- **Audio encoder**: Random init (no pretrained ancestor)
 - **Video temporal**: Random init (novel mechanism)
 
-**Why**: KDA uses delta-rule linear attention; standard models use softmax. No common ancestor.
+**Why**: KDA uses delta-rule linear attention; standard models use softmax. Video temporal factorization is unique to MoonViT.
 
 ## Inheritance Table
 
@@ -61,8 +69,10 @@ Some traits can't transfer (architectural incompatibility):
 | **Routed Experts** | SmolLM2 FFN | Clone + 2-4% noise | Progressive mutation |
 | **Vision Patch** | CLIP | Interpolate + rescale | None |
 | **Vision Projector** | CLIP MLP | Truncate + rescale | None |
+| **Audio Conv** | Whisper | Truncate 512d→256d | None |
+| **Audio Pos Embed** | Whisper | Interpolate 1500→3000 frames | None |
+| **Audio Transformers** | Whisper | Adapt 512d→256d | None |
 | **Attention** | — | Random | Novel trait |
-| **Audio Encoder** | — | Random | Novel trait |
 | **Video Temporal** | — | Random | Novel trait |
 
 ## Research Precedent
@@ -76,10 +86,9 @@ Some traits can't transfer (architectural incompatibility):
 - Vision + Language models can share knowledge despite different architectures
 - Statistical rescaling prevents magnitude mismatches
 
-**Why Audio/Video Are Random**:
-- **Audio**: No widely-adopted pretrained encoder with our architecture (Whisper uses different tokenization)
-- **Video**: Temporal factorization is novel to K3/MoonViT
-- **Tradeoff**: Could use Whisper → K3 audio adapter, but adds complexity. Random init works fine with enough data.
+**Why Video Is Random**:
+- **Video**: Temporal factorization is novel to K3/MoonViT - no pretrained model uses this mechanism
+- **Tradeoff**: Could adapt from video models like VideoMAE, but they use different temporal mechanisms (tube embeddings vs factorized attention)
 
 ## Fitness Comparison
 
