@@ -288,7 +288,7 @@ def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts, tota
 
             # Evaluate every 20 steps (frequent checks, limited batches to save memory)
             if global_step % 20 == 0:
-                metrics = evaluate(model, test_loader, cfg.vocab_size, accelerator.device, max_batches=10)
+                metrics = evaluate(model, test_loader, cfg.vocab_size, accelerator.device, max_batches=3)
                 if accelerator.is_main_process:
                     accelerator.log({
                         "eval/loss": metrics['loss'],

@@ -44,17 +44,15 @@ def evaluate(model, loader: DataLoader, vocab_size: int, device: str, max_batche
                 reduction="sum"
             ).item()
             correct += (text_logits.argmax(-1)[mask] == targets[mask]).sum().item()
+
+            # Top-5 accuracy
+            top5_preds = text_logits[mask].topk(5, dim=-1).indices
+            top5_correct += (top5_preds == targets[mask].unsqueeze(-1)).any(-1).sum().item()
+
             total_tokens += mask.sum().item()
 
-        # Top-5 accuracy
-        if not hasattr(evaluate, '_top5_correct'):
-            evaluate._top5_correct = 0
-        if mask.any():
-            top5_preds = text_logits[mask].topk(5, dim=-1).indices
-            evaluate._top5_correct += (top5_preds == targets[mask].unsqueeze(-1)).any(-1).sum().item()
-
         # Free memory after each batch
-        del ids, images, has_visual, audio_mel, has_audio, logits, targets
+        del ids, images, has_visual, audio_mel, has_audio, logits, targets, text_logits, mask
         if "cuda" in str(device):
             torch.cuda.empty_cache()
 
