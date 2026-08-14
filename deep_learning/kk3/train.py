@@ -303,8 +303,8 @@ def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts, tota
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
 
-            # Save checkpoint every 100 steps
-            if global_step % 100 == 0 and accelerator.is_main_process:
+            # Save checkpoint every 500 steps
+            if global_step % 500 == 0 and accelerator.is_main_process:
                 ckpt_dir = Path("checkpoints")
                 ckpt_dir.mkdir(exist_ok=True)
                 ckpt_path = ckpt_dir / f"k3_step{global_step}.pt"
@@ -320,6 +320,12 @@ def main(epochs, batch_size, n_train, n_eval, resume, adam, active_experts, tota
                     ckpt_path,
                 )
                 click.secho(f"💾 Checkpoint saved: {ckpt_path}", fg="magenta")
+
+                # Keep only latest checkpoint to save disk space
+                old_ckpts = sorted(ckpt_dir.glob("k3_step*.pt"), key=lambda p: p.stat().st_mtime)[:-1]
+                for old_ckpt in old_ckpts:
+                    old_ckpt.unlink()
+                    click.secho(f"🗑️  Removed old checkpoint: {old_ckpt.name}", fg="yellow")
 
         # End of epoch - just log it
         if accelerator.is_main_process:
