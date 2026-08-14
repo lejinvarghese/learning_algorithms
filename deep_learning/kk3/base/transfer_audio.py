@@ -13,7 +13,7 @@ def transfer_audio_encoder(whisper_model, k3_model, cfg):
     click.echo("  📦 Transferring Whisper encoder → K3 audio...")
 
     transferred = 0
-    encoder = whisper_model.model.encoder
+    encoder = whisper_model.encoder
     k3_audio = k3_model.audio
 
     # 1. Transfer conv layers (Whisper has 2 conv1d, K3 has WhisperStyleConv)
